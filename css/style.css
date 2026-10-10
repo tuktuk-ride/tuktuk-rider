@@ -231,3 +231,36 @@ footer b { color: #1d1f23; font-weight: 800; }
 /* Locked fields (e.g. rates controlled by the online rates file) */
 input:disabled { background: #f0f1f3; color: var(--muted); cursor: not-allowed; }
 .notice { margin-bottom: 8px; }
+
+/* Install app */
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.install-btn {
+  border: 2px solid #1d1f23;
+  background: transparent;
+  color: #1d1f23;
+  font-weight: 700;
+  font-size: .85rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.install-hint { position: relative; background: #fff7e0; border-color: #f3d27a; padding-right: 40px; }
+.install-hint p { margin: 6px 0 0; font-size: .9rem; }
+.hint-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: none;
+  font-size: 1rem;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 6px;
+}
+.share-icon {
+  display: inline-block;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: .8rem;
+}

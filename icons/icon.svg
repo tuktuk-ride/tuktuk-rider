@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- TukTuk Rider app icon: three-wheeler side view on tuk-tuk yellow -->
+  <rect width="512" height="512" rx="96" fill="#f5b301"/>
+  <g transform="translate(96 120)">
+    <!-- canopy roof -->
+    <path d="M24 66 Q24 22 68 22 H222 Q262 22 280 62 L284 72 H24 Z" fill="#1d1f23"/>
+    <!-- open sides: rear post, middle post -->
+    <rect x="28" y="66" width="20" height="90" fill="#1d1f23"/>
+    <rect x="150" y="66" width="12" height="90" fill="#1d1f23"/>
+    <!-- passenger seat -->
+    <rect x="56" y="112" width="84" height="30" rx="10" fill="#1d1f23"/>
+    <!-- windscreen frame + rounded nose -->
+    <path d="M226 66 H282 L314 176 Q320 206 292 206 H232 Z" fill="#1d1f23"/>
+    <path d="M238 82 H272 L292 150 H238 Z" fill="#f5b301"/>
+    <!-- lower body -->
+    <path d="M20 140 H250 V206 H34 Q20 206 20 192 Z" fill="#1d1f23"/>
+    <!-- headlight -->
+    <circle cx="300" cy="178" r="9" fill="#fff4cc"/>
+    <!-- wheels -->
+    <circle cx="84" cy="212" r="42" fill="#1d1f23" stroke="#f5b301" stroke-width="10"/>
+    <circle cx="84" cy="212" r="13" fill="#f5b301"/>
+    <circle cx="266" cy="214" r="36" fill="#1d1f23" stroke="#f5b301" stroke-width="10"/>
+    <circle cx="266" cy="214" r="11" fill="#f5b301"/>
+  </g>
+</svg>

@@ -60,7 +60,7 @@ function resetSettings() {
 // IS_FUEL_PRICE true  = FUEL_PRICE / PER_LITER from the API (fuel adjustment on).
 // IS_FUEL_PRICE false = fuel price, km per liter and the on/off tick from admin settings.
 // Must be https: the app is served over https on GitHub Pages and browsers block http requests from it.
-const RATES_URL = 'http://tuktukfee.theguru.asia/tuktuk.json';
+const RATES_URL = 'https://tuktukfee.theguru.asia/tuktuk.json';
 
 // Resolves to settings overrides ({ firstKmRate, nextKmRate, ... }) when online rates are active, otherwise null.
 async function fetchOnlineRates() {
