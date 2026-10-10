@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5b301">
+  <title>TukTuk Rider – Admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛺</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>🛺 TukTuk Rider · Admin</h1>
+    <a href="index.html">← Back</a>
+  </header>
+
+  <main>
+    <!-- LOGIN -->
+    <section class="card" id="loginCard">
+      <h2>Admin login</h2>
+      <label for="pinInput">PIN</label>
+      <input type="password" id="pinInput" inputmode="numeric" placeholder="Enter admin PIN">
+      <p class="hint">Default PIN is 1234 — change it after logging in.</p>
+      <button class="btn" id="loginBtn" type="button">Login</button>
+      <div class="error" id="loginError"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <form id="settingsForm" class="hidden">
+      <section class="card">
+        <h2>Fare rates</h2>
+        <div class="notice hidden" id="onlineRatesNotice">
+          ✓ <b>Official online rates are active.</b> 1st km and next km prices come from the
+          online rates file and can't be changed here (the "partial km" tick too, if the file sets it). They are also saved on this device
+          and used if the online file can't be reached.
+        </div>
+        <label for="firstKmRate">1st km price</label>
+        <input type="number" id="firstKmRate" inputmode="decimal" min="0" step="0.01" required>
+
+        <label for="nextKmRate">Each next km price</label>
+        <input type="number" id="nextKmRate" inputmode="decimal" min="0" step="0.01" required>
+
+        <label for="currency">Currency label</label>
+        <input type="text" id="currency" maxlength="6" required>
+
+        <label class="check">
+          <input type="checkbox" id="roundUpKm">
+          Charge partial km as a full km (e.g. 3.2 km → 4 km)
+        </label>
+
+        <p class="hint" id="example"></p>
+      </section>
+
+      <section class="card">
+        <h2>Fuel</h2>
+        <div class="notice hidden" id="onlineFuelNotice">
+          ✓ Locked fields come from the <b>online rates file</b> and can't be changed here.
+        </div>
+        <label class="check">
+          <input type="checkbox" id="fuelEnabled">
+          Adjust next km price by fuel price
+        </label>
+        <div class="row">
+          <div>
+            <label for="fuelPrice">Current fuel price (per liter)</label>
+            <input type="number" id="fuelPrice" inputmode="decimal" min="1" step="0.01" required>
+          </div>
+          <div>
+            <label for="baseFuelPrice">Base fuel price</label>
+            <input type="number" id="baseFuelPrice" inputmode="decimal" min="1" step="0.01" required>
+          </div>
+        </div>
+        <p class="hint">Base = the fuel price your km prices were set at. Update only the current price when fuel changes.</p>
+
+        <div class="row">
+          <div>
+            <label for="fuelStep">For every fuel change of Rs.</label>
+            <input type="number" id="fuelStep" inputmode="decimal" min="1" step="1" required>
+          </div>
+          <div>
+            <label for="fuelStepChange">Next km price changes by Rs.</label>
+            <input type="number" id="fuelStepChange" inputmode="decimal" min="0" step="0.01" required>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="fuelMinNextKm">Next km lowest price</label>
+            <input type="number" id="fuelMinNextKm" inputmode="decimal" min="0" step="0.01" required>
+          </div>
+          <div>
+            <label for="fuelMaxNextKm">Next km highest price</label>
+            <input type="number" id="fuelMaxNextKm" inputmode="decimal" min="0" step="0.01" required>
+          </div>
+        </div>
+        <p class="hint">The fuel change keeps the next km price within these limits. If the next km price is set outside them, no fuel change is applied.</p>
+
+        <label for="kmPerLiter">Km per liter</label>
+        <input type="number" id="kmPerLiter" inputmode="decimal" min="1" step="0.1" required>
+
+        <div class="notice" id="fuelSummary"></div>
+      </section>
+
+      <section class="card">
+        <h2>Map</h2>
+        <label class="check">
+          <input type="radio" name="mapProvider" value="osm">
+          OpenStreetMap — free, no API key needed
+        </label>
+        <label class="check">
+          <input type="radio" name="mapProvider" value="google">
+          Google Maps — better place search, needs an API key
+        </label>
+
+        <div id="googleKeyBox">
+          <label for="googleApiKey">Google Maps API key</label>
+          <input type="text" id="googleApiKey" placeholder="AIza..." autocomplete="off">
+          <p class="hint">
+            Enable <b>Maps JavaScript API</b>, <b>Places API (New)</b> and <b>Routes API</b> for this key
+            in Google Cloud Console (a billing account is required, but there is a free monthly quota).
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Receipt details</h2>
+        <p class="hint">Shown at the top of the PDF receipt sent to passengers. Leave empty to hide.</p>
+        <label for="driverName">Driver name</label>
+        <input type="text" id="driverName" placeholder="e.g. Sunil Perera">
+
+        <label for="vehicleNo">Vehicle number</label>
+        <input type="text" id="vehicleNo" placeholder="e.g. WP ABC-1234">
+
+        <label for="driverPhone">Contact phone</label>
+        <input type="text" id="driverPhone" inputmode="tel" placeholder="e.g. 077 123 4567">
+      </section>
+
+      <section class="card">
+        <h2>Security</h2>
+        <label for="adminPin">Admin PIN</label>
+        <input type="text" id="adminPin" inputmode="numeric" minlength="4" required>
+      </section>
+
+      <button class="btn" type="submit">💾 Save settings</button>
+      <button class="btn danger" id="resetBtn" type="button">Reset to defaults</button>
+    </form>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <footer>Developed by <b>Team TGA</b></footer>
+
+  <script src="js/settings.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
