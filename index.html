@@ -69,6 +69,7 @@
         <p class="hint">Tip: you can also tap the map — 1st tap = start, 2nd tap = end. Drag pins to adjust.</p>
         <div id="map"></div>
 
+        <div class="waiting-slot"></div>
         <div class="row">
           <button class="btn secondary" id="clearMapBtn" type="button">Clear</button>
           <button class="btn" id="calcMapBtn" type="button">Calculate Fare</button>
@@ -90,6 +91,7 @@
             <input type="number" id="endMeter" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 12458.2">
           </div>
         </div>
+        <div class="waiting-slot"></div>
         <div class="row">
           <button class="btn secondary" id="clearMeterBtn" type="button">Clear</button>
           <button class="btn" id="calcMeterBtn" type="button">Calculate Fare</button>
@@ -97,6 +99,22 @@
         <div class="error" id="meterError"></div>
       </div>
     </section>
+
+    <!-- WAITING TIME: one box, moved by js/app.js into the open tab, just above Calculate Fare -->
+    <div class="waiting-box hidden" id="waitingCard">
+      <h2>⏱ Waiting time</h2>
+      <div class="row">
+        <div>
+          <label for="waitHours">Hours</label>
+          <input type="number" id="waitHours" inputmode="numeric" min="0" step="1" placeholder="0">
+        </div>
+        <div>
+          <label for="waitMinutes">Minutes</label>
+          <input type="number" id="waitMinutes" inputmode="numeric" min="0" max="59" step="1" placeholder="0">
+        </div>
+      </div>
+      <p class="hint" id="waitingInfo"></p>
+    </div>
 
     <!-- RESULT -->
     <section class="card result hidden" id="resultCard">

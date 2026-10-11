@@ -1,5 +1,5 @@
 // Builds a receipt-style PDF (80mm wide, like a thermal slip) with jsPDF.
-// trip = { mode: 'map' | 'meter', from, to, startMeter, endMeter, distanceKm, mins, passenger, date }
+// trip = { mode: 'map' | 'meter', from, to, startMeter, endMeter, distanceKm, mins, waitingMins, passenger, date }
 
 // jsPDF's built-in font only supports basic Latin characters
 function pdfSafe(str) {
@@ -20,7 +20,7 @@ function createReceiptPdf(trip, s = loadSettings()) {
   const { jsPDF } = window.jspdf;
   const W = 80;        // page width (mm)
   const M = 6;         // side margin
-  const f = calculateFare(trip.distanceKm, s);
+  const f = calculateFare(trip.distanceKm, s, trip.waitingMins);
   const money = (v) => pdfSafe(formatMoney(v, s));
 
   // Runs twice: first to measure the height, then to actually draw.
@@ -93,11 +93,13 @@ function createReceiptPdf(trip, s = loadSettings()) {
     row('Distance', `${trip.distanceKm.toFixed(2)} km`);
     if (s.roundUpKm) row('Charged as', `${f.km} km`);
     if (trip.mins) row('Travel time', `~${trip.mins} min`);
+    if (f.waitMins) row('Waiting time', formatWaiting(f.waitMins));
     divider();
 
     // Fare breakdown
-    row('1st km', money(f.firstPart));
-    row(`Next ${f.nextKm.toFixed(2)} km x ${money(f.nextRate)}`, money(f.nextPart.toFixed(2)));
+    row(`${f.km.toFixed(2)} km x ${money(f.perKmRate)}`, money(f.kmPart.toFixed(2)));
+    if (f.minimumApplied) row('Minimum fare applied', money(f.minimumFare));
+    if (f.waitMins) row(`Waiting (${money(f.waitRate)}/hour)`, money(f.waitingPart.toFixed(2)));
     row('Exact amount', money(f.exact.toFixed(2)));
     if (f.exact > f.total) row('Rounding (down to 10)', `- ${money((f.exact - f.total).toFixed(2))}`);
     divider();

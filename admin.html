@@ -32,20 +32,30 @@
       <div class="error" id="loginError"></div>
     </section>
 
+    <!-- TABS (shown after login) -->
+    <div class="tabs hidden" id="adminTabs">
+      <button class="tab active" type="button" data-panel="settingsForm">⚙ Settings</button>
+      <button class="tab" type="button" data-panel="costPanel">🧮 Cost per km</button>
+    </div>
+
     <!-- SETTINGS -->
     <form id="settingsForm" class="hidden">
       <section class="card">
         <h2>Fare rates</h2>
         <div class="notice hidden" id="onlineRatesNotice">
-          ✓ <b>Official online rates are active.</b> 1st km and next km prices come from the
+          ✓ <b>Official online rates are active.</b> Minimum fare and per km price come from the
           online rates file and can't be changed here (the "partial km" tick too, if the file sets it). They are also saved on this device
           and used if the online file can't be reached.
         </div>
-        <label for="firstKmRate">1st km price</label>
-        <input type="number" id="firstKmRate" inputmode="decimal" min="0" step="0.01" required>
+        <div class="notice override-notice hidden" id="overrideNotice">
+          <div id="overrideText"></div>
+          <button class="btn small secondary" id="overrideResetBtn" type="button">↩ Reset to API price</button>
+        </div>
+        <label for="minimumFare">Minimum fare</label>
+        <input type="number" id="minimumFare" inputmode="decimal" min="0" step="0.01" required>
 
-        <label for="nextKmRate">Each next km price</label>
-        <input type="number" id="nextKmRate" inputmode="decimal" min="0" step="0.01" required>
+        <label for="perKmRate">Per km price</label>
+        <input type="number" id="perKmRate" inputmode="decimal" min="0" step="0.01" required>
 
         <label for="currency">Currency label</label>
         <input type="text" id="currency" maxlength="6" required>
@@ -56,6 +66,7 @@
         </label>
 
         <p class="hint" id="example"></p>
+        <button class="btn secondary" type="button" data-goto="costPanel">🧮 Work out the real cost per km</button>
       </section>
 
       <section class="card">
@@ -65,7 +76,7 @@
         </div>
         <label class="check">
           <input type="checkbox" id="fuelEnabled">
-          Adjust next km price by fuel price
+          Adjust per km price by fuel price
         </label>
         <div class="row">
           <div>
@@ -85,27 +96,41 @@
             <input type="number" id="fuelStep" inputmode="decimal" min="1" step="1" required>
           </div>
           <div>
-            <label for="fuelStepChange">Next km price changes by Rs.</label>
+            <label for="fuelStepChange">Per km price changes by Rs.</label>
             <input type="number" id="fuelStepChange" inputmode="decimal" min="0" step="0.01" required>
           </div>
         </div>
 
         <div class="row">
           <div>
-            <label for="fuelMinNextKm">Next km lowest price</label>
-            <input type="number" id="fuelMinNextKm" inputmode="decimal" min="0" step="0.01" required>
+            <label for="fuelMinPerKm">Per km lowest price</label>
+            <input type="number" id="fuelMinPerKm" inputmode="decimal" min="0" step="0.01" required>
           </div>
           <div>
-            <label for="fuelMaxNextKm">Next km highest price</label>
-            <input type="number" id="fuelMaxNextKm" inputmode="decimal" min="0" step="0.01" required>
+            <label for="fuelMaxPerKm">Per km highest price</label>
+            <input type="number" id="fuelMaxPerKm" inputmode="decimal" min="0" step="0.01" required>
           </div>
         </div>
-        <p class="hint">The fuel change keeps the next km price within these limits. If the next km price is set outside them, no fuel change is applied.</p>
+        <p class="hint">The fuel change keeps the per km price within these limits. If the per km price is set outside them, no fuel change is applied.</p>
 
         <label for="kmPerLiter">Km per liter</label>
         <input type="number" id="kmPerLiter" inputmode="decimal" min="1" step="0.1" required>
 
         <div class="notice" id="fuelSummary"></div>
+      </section>
+
+      <section class="card">
+        <h2>Waiting charge</h2>
+        <div class="notice hidden" id="onlineWaitingNotice">
+          ✓ Waiting charge comes from the <b>online rates file</b> and can't be changed here.
+        </div>
+        <label class="check">
+          <input type="checkbox" id="waitingEnabled">
+          Charge for waiting time
+        </label>
+        <label for="waitingPerHour">Waiting charge per hour</label>
+        <input type="number" id="waitingPerHour" inputmode="decimal" min="0" step="0.01" required>
+        <p class="hint" id="waitingExample"></p>
       </section>
 
       <section class="card">
@@ -151,6 +176,47 @@
       <button class="btn" type="submit">💾 Save settings</button>
       <button class="btn danger" id="resetBtn" type="button">Reset to defaults</button>
     </form>
+
+    <!-- COST PER KM (default figures from config.json) -->
+    <div id="costPanel" class="hidden">
+      <section class="card">
+        <p class="hint" style="margin-top:0">
+          Work out what a km really costs to run the vehicle, and what to charge per km.
+          Enter your own figures; everything else calculates automatically.
+        </p>
+        <label for="ccVehicle">Vehicle type</label>
+        <select id="ccVehicle"></select>
+        <p class="hint">Each vehicle type keeps its own figures.</p>
+        <div class="error hidden" id="ccLoadError"></div>
+      </section>
+
+      <section class="card">
+        <h2>1. Vehicle costs</h2>
+        <div id="ccCostInputs"></div>
+      </section>
+
+      <section class="card">
+        <h2>2. Rate per km</h2>
+        <table class="breakdown calc-table" id="ccRateTable"></table>
+        <div class="charge-box">
+          <div class="hint">CHARGE PER KM</div>
+          <div class="total" id="ccChargePerKm">-</div>
+          <div class="hint">Includes profit and empty return allowance</div>
+        </div>
+        <div class="notice" id="ccCompare"></div>
+        <button class="btn" id="ccApplyBtn" type="button">✅ Apply as the per km price</button>
+        <p class="hint" id="ccApplyInfo"></p>
+      </section>
+
+      <section class="card">
+        <h2>3. Test a trip</h2>
+        <div id="ccTripInputs"></div>
+        <table class="breakdown calc-table" id="ccTripTable"></table>
+        <p class="hint">Total is rounded down to the nearest Rs. 10, the same as the app.</p>
+      </section>
+
+      <button class="btn danger" id="ccResetBtn" type="button">Reset figures to defaults</button>
+    </div>
   </main>
 
   <div class="toast" id="toast"></div>
@@ -158,6 +224,7 @@
   <footer>Developed by <b>Team TGA</b></footer>
 
   <script src="js/settings.js"></script>
+  <script src="js/cost.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/install.js"></script>
 </body>

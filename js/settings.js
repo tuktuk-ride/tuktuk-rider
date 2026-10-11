@@ -2,31 +2,42 @@
 const SETTINGS_KEY = 'tuktuk_settings_v1';
 
 const DEFAULT_SETTINGS = {
-  firstKmRate: 100,     // price for the 1st km (Rs.)
-  nextKmRate: 65,       // price for every km after the 1st (Rs.)
+  minimumFare: 100,     // lowest fare for a trip's distance (Rs.)
+  perKmRate: 65,        // price per km (Rs.)
+  perKmOverride: null,  // per km price applied from the admin cost calculator; replaces the API/admin
+                        // per km price on this phone (no fuel adjustment) until reset. null = not used
   roundUpKm: false,     // true = charge partial km as a full km
   currency: 'Rs.',
   mapProvider: 'osm',   // 'osm' = OpenStreetMap (free) | 'google' = Google Maps (needs API key)
   googleApiKey: '',     // Google Maps API key (Maps JavaScript API + Places API (New) + Routes API)
   adminPin: '1234',
-  fuelEnabled: true,    // adjust the next km price by fuel price (API IS_FUEL_PRICE overrides this)
-  // Fuel. Next km price moves by fuelStepChange for every fuelStep the fuel price
+  fuelEnabled: true,    // adjust the per km price by fuel price (API IS_FUEL_PRICE overrides this)
+  // Fuel. Per km price moves by fuelStepChange for every fuelStep the fuel price
   // is above/below the band of baseFuelPrice. Bands are multiples of fuelStep (400-424, 425-449...).
   fuelPrice: 414,       // current fuel price per liter
   baseFuelPrice: 414,   // fuel price the km prices were set at
   fuelStep: 25,         // every Rs. 25 band...
-  fuelStepChange: 5,    // ...changes the next km price by Rs. 5
-  fuelMinNextKm: 50,    // fuel change never takes the next km price below this...
-  fuelMaxNextKm: 100,   // ...or above this
+  fuelStepChange: 5,    // ...changes the per km price by Rs. 5
+  fuelMinPerKm: 50,     // fuel change never takes the per km price below this...
+  fuelMaxPerKm: 100,    // ...or above this
   kmPerLiter: 28,       // info only: fuel cost per km
+  waitingEnabled: true, // charge for waiting time (API IS_WAITING true overrides this)
+  waitingPerHour: 300,  // waiting charge per hour
   driverName: '',       // shown on PDF receipts
   vehicleNo: '',
   driverPhone: ''
 };
 
+// Settings saved by older versions used "1st km / next km" names: carry them over
+const OLD_NAMES = { firstKmRate: 'minimumFare', nextKmRate: 'perKmRate', fuelMinNextKm: 'fuelMinPerKm', fuelMaxNextKm: 'fuelMaxPerKm' };
+
 function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    Object.entries(OLD_NAMES).forEach(([oldName, newName]) => {
+      if (saved[oldName] !== undefined && saved[newName] === undefined) saved[newName] = saved[oldName];
+      delete saved[oldName];
+    });
     return { ...DEFAULT_SETTINGS, ...saved };
   } catch (e) {
     return { ...DEFAULT_SETTINGS };
@@ -49,7 +60,7 @@ function resetSettings() {
 
 // ---------- Online rates ----------
 // Central rates file, e.g.
-// { "1ST_KM": 100, "NEXT_KMS": 65, "ROUND_UP_KM": false, "IS_STOPPED": false,
+// { "MINIMUM_FARE": 100, "PER_KM": 65, "ROUND_UP_KM": false, "IS_STOPPED": false,
 //   "IS_FUEL_PRICE": true, "FUEL_PRICE": 414, "BASE_FUEL_PRICE": 414, "PER_LITER": 28,
 //   "CHANGE_PRICE_PER": 25, "CHANGE_AMOUNT": 5, "MIN_CHANGE": 50, "MAX_CHANGE": 100 }
 // IS_STOPPED false -> these values are used everywhere (matching admin fields are locked).
@@ -59,10 +70,12 @@ function resetSettings() {
 //   API when present, otherwise admin values.
 // IS_FUEL_PRICE true  = FUEL_PRICE / PER_LITER from the API (fuel adjustment on).
 // IS_FUEL_PRICE false = fuel price, km per liter and the on/off tick from admin settings.
+// IS_WAITING true  = waiting charge on, WAITING_PER_HOUR from the API (admin rate if missing/invalid).
+// IS_WAITING false or missing = waiting on/off tick and rate from admin settings.
 // Must be https: the app is served over https on GitHub Pages and browsers block http requests from it.
 const RATES_URL = 'https://tuktukfee.theguru.asia/tuktuk.json';
 
-// Resolves to settings overrides ({ firstKmRate, nextKmRate, ... }) when online rates are active, otherwise null.
+// Resolves to settings overrides ({ minimumFare, perKmRate, ... }) when online rates are active, otherwise null.
 async function fetchOnlineRates() {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
@@ -70,11 +83,11 @@ async function fetchOnlineRates() {
     const res = await fetch(RATES_URL, { cache: 'no-store', signal: ctrl.signal });
     if (!res.ok) return null;
     const data = await res.json();
-    const first = Number(data['1ST_KM']);
-    const next = Number(data['NEXT_KMS']);
-    if (data.IS_STOPPED !== false) return null;               // stopped (or missing) -> use admin rates
-    if (!(first >= 0) || !(next >= 0)) return null;            // bad numbers -> use admin rates
-    const rates = { firstKmRate: first, nextKmRate: next };
+    const minFare = Number(data.MINIMUM_FARE);
+    const perKm = Number(data.PER_KM);
+    if (data.IS_STOPPED !== false) return null;                // stopped (or missing) -> use admin rates
+    if (!(minFare >= 0) || !(perKm >= 0)) return null;         // missing / bad numbers -> use admin rates
+    const rates = { minimumFare: minFare, perKmRate: perKm };
     if (typeof data.ROUND_UP_KM === 'boolean') rates.roundUpKm = data.ROUND_UP_KM;
 
     // Copies API number fields into settings. Only valid numbers are taken; anything else keeps the admin value.
@@ -86,13 +99,19 @@ async function fetchOnlineRates() {
     // Fuel rule
     take({
       BASE_FUEL_PRICE: 'baseFuelPrice', CHANGE_PRICE_PER: 'fuelStep', CHANGE_AMOUNT: 'fuelStepChange',
-      MIN_CHANGE: 'fuelMinNextKm', MAX_CHANGE: 'fuelMaxNextKm'
+      MIN_CHANGE: 'fuelMinPerKm', MAX_CHANGE: 'fuelMaxPerKm'
     }, (n, key) => (key === 'CHANGE_AMOUNT' ? n >= 0 : n > 0));
 
     // Fuel price: from the API only when IS_FUEL_PRICE is true, otherwise admin settings
     if (data.IS_FUEL_PRICE === true) {
       take({ FUEL_PRICE: 'fuelPrice', PER_LITER: 'kmPerLiter' }, (n) => n > 0);
       rates.fuelEnabled = rates.fuelPrice > 0; // no usable API fuel price -> no fuel adjustment (never guess)
+    }
+
+    // Waiting charge: from the API only when IS_WAITING is true, otherwise admin settings
+    if (data.IS_WAITING === true) {
+      rates.waitingEnabled = true;
+      take({ WAITING_PER_HOUR: 'waitingPerHour' }, (n) => n >= 0);
     }
     return rates;
   } catch (e) {
@@ -102,7 +121,7 @@ async function fetchOnlineRates() {
   }
 }
 
-// Rs. added to (or taken off) the next km price because of the fuel price.
+// Rs. added to (or taken off) the per km price because of the fuel price.
 // e.g. base 414, step 25, change 5: 425-449 -> +5, 450-474 -> +10, 375-399 -> -5, below 375 -> -10
 function fuelAdjustment(s) {
   if (!s.fuelEnabled) return 0;
@@ -112,34 +131,53 @@ function fuelAdjustment(s) {
   return (Math.floor(fuel / step) - Math.floor(base / step)) * change;
 }
 
-// Next km price actually charged = base next km price (API or admin) + fuel adjustment,
+// Per km price actually charged = base per km price (API or admin) + fuel adjustment,
 // kept within min..max. If the base price itself is outside min..max, no fuel adjustment is applied.
-function effectiveNextKmRate(s) {
-  const base = Number(s.nextKmRate);
-  const min = Number(s.fuelMinNextKm), max = Number(s.fuelMaxNextKm);
+function effectivePerKmRate(s) {
+  if (Number(s.perKmOverride) > 0) return Number(s.perKmOverride); // cost calculator price wins
+  const base = Number(s.perKmRate);
+  const min = Number(s.fuelMinPerKm), max = Number(s.fuelMaxPerKm);
   if (!s.fuelEnabled || base < min || base > max) return base;
   return Math.min(max, Math.max(min, base + fuelAdjustment(s)));
 }
 
+// Waiting charge per hour actually used (0 = waiting charge off)
+function waitingRate(s) {
+  const rate = Number(s.waitingPerHour);
+  return s.waitingEnabled && rate > 0 ? rate : 0;
+}
+
+// 85 -> "1 h 25 min", 25 -> "25 min", 120 -> "2 h"
+function formatWaiting(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return [h ? `${h} h` : '', m || !h ? `${m} min` : ''].filter(Boolean).join(' ');
+}
+
 /**
- * Fare = first km price + (remaining km × next km price incl. fuel adjustment).
- * Any trip up to 1 km is charged the first km price (minimum fare).
+ * Distance fare = km × per km price (incl. fuel adjustment), but never less than the minimum fare.
+ * Fare = distance fare + waiting charge, then rounded down to the nearest 10.
  */
-function calculateFare(distanceKm, s = loadSettings()) {
+function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0) {
   // Round to 2 decimals first so float errors (4.1 - 1.1 = 2.9999999999999996) can't change the fare
   const round2 = (n) => Math.round(n * 100) / 100;
   let km = round2(Math.max(0, Number(distanceKm) || 0));
   if (s.roundUpKm) km = Math.ceil(km);
 
-  const nextRate = effectiveNextKmRate(s);
-  if (km === 0) return { km, nextRate, firstPart: 0, nextKm: 0, nextPart: 0, exact: 0, total: 0 };
+  const perKmRate = effectivePerKmRate(s);
+  const minimumFare = Number(s.minimumFare);
+  const waitRate = waitingRate(s);
+  const waitMins = waitRate ? Math.max(0, Math.round(Number(waitingMins) || 0)) : 0;
+  const waitingPart = round2((waitMins / 60) * waitRate);
+  if (km === 0) {
+    return { km, perKmRate, minimumFare, kmPart: 0, minimumApplied: false, distanceFare: 0, waitRate, waitMins: 0, waitingPart: 0, exact: 0, total: 0 };
+  }
 
-  const nextKm = round2(Math.max(0, km - 1));
-  const firstPart = Number(s.firstKmRate);
-  const nextPart = round2(nextKm * nextRate);
-  const exact = round2(firstPart + nextPart);
+  const kmPart = round2(km * perKmRate);
+  const minimumApplied = kmPart < minimumFare;
+  const distanceFare = minimumApplied ? minimumFare : kmPart;
+  const exact = round2(distanceFare + waitingPart);
   const total = Math.floor(exact / 10) * 10; // round DOWN to nearest 10 (e.g. 89 -> 80, 68.68 -> 60)
-  return { km, nextRate, firstPart, nextKm, nextPart, exact, total };
+  return { km, perKmRate, minimumFare, kmPart, minimumApplied, distanceFare, waitRate, waitMins, waitingPart, exact, total };
 }
 
 function formatMoney(amount, s = loadSettings()) {

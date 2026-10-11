@@ -4,17 +4,22 @@ const $ = (id) => document.getElementById(id);
 // ---------- Rates (online file first, admin settings as fallback) ----------
 // e.g. " (incl. fuel +Rs. 5)" - the change actually applied after the min/max limits
 function fuelNote() {
-  const applied = effectiveNextKmRate(settings) - Number(settings.nextKmRate);
+  if (Number(settings.perKmOverride) > 0) return ' (admin cost calculator price)';
+  const applied = effectivePerKmRate(settings) - Number(settings.perKmRate);
   return applied ? ` (incl. fuel ${applied > 0 ? '+' : '-'}${formatMoney(Math.abs(applied), settings)})` : '';
 }
 
 function showRateInfo(source) {
   $('rateInfo').textContent =
-    `1st km: ${formatMoney(settings.firstKmRate, settings)}  •  ` +
-    `Each next km: ${formatMoney(effectiveNextKmRate(settings), settings)}` +
+    `Minimum fare: ${formatMoney(settings.minimumFare, settings)}  •  ` +
+    `Per km: ${formatMoney(effectivePerKmRate(settings), settings)}` +
     fuelNote() +
-    (settings.roundUpKm ? '  •  partial km charged as full km' : '');
+    (settings.roundUpKm ? '  •  partial km charged as full km' : '') +
+    (waitingRate(settings) ? `  •  Waiting: ${formatMoney(waitingRate(settings), settings)}/hour` : '');
   $('rateSource').textContent = source;
+
+  $('waitingCard').classList.toggle('hidden', !waitingRate(settings));
+  $('waitingInfo').textContent = `Charged at ${formatMoney(waitingRate(settings), settings)} per hour.`;
 }
 
 $('rateInfo').textContent = 'Loading rates…';
@@ -29,35 +34,59 @@ const ratesReady = fetchOnlineRates().then((online) => {
 });
 
 // ---------- Tabs ----------
+// The waiting time box sits just above the Calculate Fare button of whichever tab is open
+function placeWaitingBox(panelId) {
+  $(panelId).querySelector('.waiting-slot').appendChild($('waitingCard'));
+}
+
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
     tab.classList.add('active');
     $(tab.dataset.panel).classList.add('active');
+    placeWaitingBox(tab.dataset.panel);
   });
 });
+placeWaitingBox(document.querySelector('.tab.active').dataset.panel);
 
 // ---------- Result ----------
 let lastTrip = null; // details of the last calculated trip, used for the PDF receipt
 
+// Waiting time from the Hours / Minutes boxes, in whole minutes (blank or negative = 0)
+function getWaitingMins() {
+  if (!waitingRate(settings)) return 0;
+  const h = Math.max(0, parseFloat($('waitHours').value) || 0);
+  const m = Math.max(0, parseFloat($('waitMinutes').value) || 0);
+  return Math.round(h * 60 + m);
+}
+
 function showResult(distanceKm, durationText, trip) {
-  lastTrip = { ...trip, distanceKm, date: new Date() };
-  const f = calculateFare(distanceKm, settings);
-  $('resultDistance').textContent = `Distance: ${Number(distanceKm).toFixed(2)} km` +
-    (settings.roundUpKm ? ` (charged as ${f.km} km)` : '');
-  $('resultTotal').textContent = formatMoney(f.total, settings);
-  $('resultDuration').textContent = durationText || '';
-
-  $('resultBreakdown').innerHTML = `
-    <tr><td>1st km</td><td>${formatMoney(f.firstPart, settings)}</td></tr>
-    <tr><td>Next ${f.nextKm.toFixed(2)} km × ${formatMoney(f.nextRate, settings)}</td>
-        <td>${formatMoney(f.nextPart.toFixed(2), settings)}</td></tr>
-    <tr><td>Exact amount</td><td>${formatMoney(f.exact.toFixed(2), settings)}</td></tr>
-    <tr><td><b>Total (rounded down to 10)</b></td><td><b>${formatMoney(f.total, settings)}</b></td></tr>`;
-
+  lastTrip = { ...trip, distanceKm, durationText, date: new Date() };
+  renderResult();
   $('resultCard').classList.remove('hidden');
   $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function renderResult() {
+  lastTrip.waitingMins = getWaitingMins();
+  const f = calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins);
+  $('resultDistance').textContent = `Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
+    (settings.roundUpKm ? ` (charged as ${f.km} km)` : '') +
+    (f.waitMins ? `  •  Waiting: ${formatWaiting(f.waitMins)}` : '');
+  $('resultTotal').textContent = formatMoney(f.total, settings);
+  $('resultDuration').textContent = lastTrip.durationText || '';
+
+  $('resultBreakdown').innerHTML = `
+    <tr><td>${f.km.toFixed(2)} km × ${formatMoney(f.perKmRate, settings)}</td>
+        <td>${formatMoney(f.kmPart.toFixed(2), settings)}</td></tr>` +
+    (f.minimumApplied ? `
+    <tr><td>Minimum fare applied</td><td>${formatMoney(f.minimumFare, settings)}</td></tr>` : '') +
+    (f.waitMins ? `
+    <tr><td>Waiting ${formatWaiting(f.waitMins)} × ${formatMoney(f.waitRate, settings)}/hour</td>
+        <td>${formatMoney(f.waitingPart.toFixed(2), settings)}</td></tr>` : '') + `
+    <tr><td>Exact amount</td><td>${formatMoney(f.exact.toFixed(2), settings)}</td></tr>
+    <tr><td><b>Total (rounded down to 10)</b></td><td><b>${formatMoney(f.total, settings)}</b></td></tr>`;
 }
 
 function hideResult() {
@@ -85,7 +114,18 @@ $('calcMeterBtn').addEventListener('click', async () => {
 // Readings changed: old fare/receipt no longer valid
 ['startMeter', 'endMeter'].forEach((id) => $(id).addEventListener('input', hideResult));
 
+// Waiting time changed: update the shown fare straight away
+['waitHours', 'waitMinutes'].forEach((id) => $(id).addEventListener('input', () => {
+  if (lastTrip && !$('resultCard').classList.contains('hidden')) renderResult();
+}));
+
+function clearWaiting() {
+  $('waitHours').value = '';
+  $('waitMinutes').value = '';
+}
+
 $('clearMeterBtn').addEventListener('click', () => {
+  clearWaiting();
   $('startMeter').value = '';
   $('endMeter').value = '';
   $('meterError').textContent = '';
@@ -253,6 +293,7 @@ $('calcMapBtn').addEventListener('click', async () => {
 });
 
 $('clearMapBtn').addEventListener('click', () => {
+  clearWaiting();
   ['start', 'end'].forEach((w) => {
     points[w] = null;
     provider && provider.removeMarker(w);
@@ -284,7 +325,7 @@ $('shareReceiptBtn').addEventListener('click', async () => {
   const r = buildReceipt();
   if (!r) return;
   const file = new File([r.doc.output('blob')], r.fileName, { type: 'application/pdf' });
-  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings).total, settings);
+  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins).total, settings);
 
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {

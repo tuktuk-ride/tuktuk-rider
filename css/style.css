@@ -274,3 +274,26 @@ header h1, .header-actions a, .install-btn { white-space: nowrap; }
   .install-btn { padding: 4px 8px; font-size: .8rem; }
   header a { font-size: .85rem; }
 }
+
+/* Cost per km calculator */
+.calc-table td { vertical-align: top; }
+.calc-table .row-note { font-size: .75rem; color: var(--muted); }
+.calc-table tr.strong td { font-weight: 700; }
+.charge-box { text-align: center; margin: 16px 0 12px; }
+.charge-box .total { font-size: 2rem; font-weight: 800; color: var(--accent); margin: 2px 0; }
+
+select {
+  width: 100%;
+  padding: 12px;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+}
+.override-notice .btn { margin-top: 10px; }
+.override-notice div { margin-top: 4px; }
+
+/* Waiting time box inside the Map / Meter card, above Calculate Fare */
+.waiting-box { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.waiting-box h2 { font-size: .95rem; margin: 0; }

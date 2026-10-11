@@ -1,0 +1,59 @@
+{
+  "costCalculator": {
+    "defaultVehicle": "tuktuk",
+    "vehicles": {
+      "tuktuk": {
+        "name": "Tuktuk",
+        "icon": "🛺",
+        "defaults": {
+          "fuelPrice": 414,
+          "kmPerLitre": 25,
+          "serviceCost": 15000,
+          "serviceKm": 3500,
+          "tyreCost": 60000,
+          "tyreKm": 40000,
+          "repairsPerKm": 3,
+          "depreciationPerKm": 7,
+          "yearlyFixed": 45000,
+          "kmPerYear": 30000,
+          "driverMonthly": 0,
+          "profitPct": 15,
+          "emptyPct": 30,
+          "tripKm": 25,
+          "minFare": 150,
+          "waitMins": 30,
+          "waitPerHour": 400,
+          "tolls": 0,
+          "parking": 0,
+          "night": 0
+        }
+      },
+      "car": {
+        "name": "Car",
+        "icon": "🚗",
+        "defaults": {
+          "fuelPrice": 414,
+          "kmPerLitre": 15,
+          "serviceCost": 20000,
+          "serviceKm": 5000,
+          "tyreCost": 100000,
+          "tyreKm": 40000,
+          "repairsPerKm": 3,
+          "depreciationPerKm": 7,
+          "yearlyFixed": 60000,
+          "kmPerYear": 30000,
+          "driverMonthly": 0,
+          "profitPct": 20,
+          "emptyPct": 20,
+          "tripKm": 25,
+          "minFare": 500,
+          "waitMins": 30,
+          "waitPerHour": 400,
+          "tolls": 0,
+          "parking": 0,
+          "night": 0
+        }
+      }
+    }
+  }
+}

@@ -2,19 +2,21 @@
 // Network first: when online, the latest files are always used (and the saved copy refreshed);
 // when offline, the saved copy is used, so the app still opens and Meter mode still works.
 // Map tiles, place search, routing and the online rates file are never cached here.
-const CACHE = 'tuktuk-rider-v1';
+const CACHE = 'tuktuk-rider-v4';
 
 const APP_FILES = [
   './',
   'index.html',
   'admin.html',
   'manifest.webmanifest',
+  'config.json',
   'css/style.css',
   'js/settings.js',
   'js/maps.js',
   'js/receipt.js',
   'js/app.js',
   'js/admin.js',
+  'js/cost.js',
   'js/install.js',
   'icons/icon.svg',
   'icons/icon-192.png',
