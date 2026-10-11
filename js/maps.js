@@ -4,6 +4,7 @@
 //   setMarker(which, pos, onDrag)   which = 'start' | 'end', pos = { lat, lng }
 //   removeMarker(which)
 //   route(a, b)                     -> Promise<{ km, mins, path: [{ lat, lng }] }>
+//   reverse(pos) (optional)         -> Promise<address string | null>
 //   drawRoute(path) / clearRoute()
 //   fit(points) / focus(pos, zoom)
 
@@ -52,6 +53,14 @@ function createOsmProvider() {
         attribution: '© OpenStreetMap contributors'
       }).addTo(map);
       map.on('click', (e) => onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng }));
+    },
+
+    async reverse(pos) {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${pos.lat}&lon=${pos.lng}`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.display_name || null;
     },
 
     async search(query) {

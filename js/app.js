@@ -160,19 +160,67 @@ document.querySelectorAll('.search-row').forEach((form) => {
   });
 });
 
-$('myLocationBtn').addEventListener('click', () => {
-  if (!provider) return mapError('Map is not loaded yet.');
-  if (!navigator.geolocation) return mapError('Location is not supported on this device.');
-  mapError('Getting your location…');
-  navigator.geolocation.getCurrentPosition(
-    (p) => {
-      const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
-      setPoint('start', pos, 'My location');
-      if (!points.end) provider.focus(pos);
-    },
-    () => mapError('Could not get your location. Allow location access (requires https or localhost).'),
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
+// ---------- Use my location ----------
+const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function getPosition(options) {
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options));
+}
+
+// Precise GPS first; if that is slow or unavailable (indoors, GPS just switched on), fall back to
+// the faster network/Wi-Fi location. A permission refusal is not retried.
+async function findMyPosition() {
+  try {
+    return await getPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+  } catch (err) {
+    if (err.code === 1) throw err; // PERMISSION_DENIED
+    return getPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
+  }
+}
+
+function locationErrorMessage(err) {
+  if (!window.isSecureContext) return 'Location only works on the https:// address of the site.';
+  const installedApp = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if (err.code === 1 && installedApp && !isIos) {
+    return 'Location is blocked. Long-press the TukTuk Rider icon → App info → Permissions → Location → Allow, and make sure the phone Location is ON. Then tap the button again.';
+  }
+  if (err.code === 1) {
+    return isIos
+      ? 'Location is blocked. iPhone: Settings → Privacy & Security → Location Services → turn ON, then Safari Websites → "While Using the App". Then tap the button again.'
+      : 'Location is blocked. Tap the 🔒 icon next to the web address → Permissions → Location → Allow, and make sure the phone Location is ON. Then tap the button again.';
+  }
+  if (err.code === 2) return 'Your phone could not find its location. Turn ON Location (GPS) in the phone settings, or search the start place / tap the map instead.';
+  return 'Finding your location took too long. Move near a window or outside and try again, or search the start place / tap the map instead.';
+}
+
+$('myLocationBtn').addEventListener('click', async () => {
+  if (!provider) return mapError('Map is not loaded yet. Check your internet connection.');
+  if (!navigator.geolocation) return mapError('This browser does not support location. Search the start place or tap the map instead.');
+
+  const btn = $('myLocationBtn');
+  btn.disabled = true;
+  btn.textContent = '📡 Finding your location…';
+  mapError();
+  try {
+    const p = await findMyPosition();
+    const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
+    const accuracy = Math.round(p.coords.accuracy);
+    setPoint('start', pos, `My location (±${accuracy} m)`);
+    $('startSearch').value = 'My location';
+    if (!points.end) provider.focus(pos);
+
+    // Show the street address instead of just "My location" (also used on the receipt)
+    if (provider.reverse) {
+      const address = await provider.reverse(pos).catch(() => null);
+      if (address && points.start === pos) setPoint('start', pos, `${address} (my location, ±${accuracy} m)`);
+    }
+  } catch (err) {
+    mapError(locationErrorMessage(err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📡 Use my location as start';
+  }
 });
 
 $('calcMapBtn').addEventListener('click', async () => {
