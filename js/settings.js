@@ -65,7 +65,7 @@ const RATES_URL = 'https://tuktukfee.theguru.asia/tuktuk.json';
 // Resolves to settings overrides ({ firstKmRate, nextKmRate, ... }) when online rates are active, otherwise null.
 async function fetchOnlineRates() {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6000);
+  const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
     const res = await fetch(RATES_URL, { cache: 'no-store', signal: ctrl.signal });
     if (!res.ok) return null;

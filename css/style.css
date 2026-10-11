@@ -264,3 +264,13 @@ input:disabled { background: #f0f1f3; color: var(--muted); cursor: not-allowed; 
   padding: 0 4px;
   font-size: .8rem;
 }
+
+/* Keep the header on one line on small phones */
+header h1, .header-actions a, .install-btn { white-space: nowrap; }
+@media (max-width: 360px) {
+  header { padding: 12px; }
+  header h1 { font-size: 1rem; }
+  .header-actions { gap: 8px; }
+  .install-btn { padding: 4px 8px; font-size: .8rem; }
+  header a { font-size: .85rem; }
+}

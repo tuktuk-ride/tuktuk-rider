@@ -93,6 +93,7 @@ function createOsmProvider() {
       const url = `https://router.project-osrm.org/route/v1/driving/` +
                   `${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
       const res = await fetch(url);
+      if (!res.ok) throw new Error('the free route service is busy. Please try again in a moment.');
       const data = await res.json();
       if (data.code !== 'Ok' || !data.routes.length) {
         throw new Error(data.message || 'No road route found between these points.');

@@ -131,7 +131,7 @@ document.querySelectorAll('.search-row').forEach((form) => {
     e.preventDefault();
     const q = $(which + 'Search').value.trim();
     if (!provider) return mapError('Map is not loaded yet.');
-    if (q.length < 2) return;
+    if (q.length < 2 || q === FINDING_ADDRESS) return;
 
     list.innerHTML = '<li class="muted">Searching…</li>';
     list.classList.remove('hidden');
@@ -161,6 +161,7 @@ document.querySelectorAll('.search-row').forEach((form) => {
 });
 
 // ---------- Use my location ----------
+const FINDING_ADDRESS = 'My location (finding address…)';
 const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -207,13 +208,17 @@ $('myLocationBtn').addEventListener('click', async () => {
     const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
     const accuracy = Math.round(p.coords.accuracy);
     setPoint('start', pos, `My location (±${accuracy} m)`);
-    $('startSearch').value = 'My location';
+    $('startSearch').value = FINDING_ADDRESS;
     if (!points.end) provider.focus(pos);
 
-    // Show the street address instead of just "My location" (also used on the receipt)
-    if (provider.reverse) {
-      const address = await provider.reverse(pos).catch(() => null);
-      if (address && points.start === pos) setPoint('start', pos, `${address} (my location, ±${accuracy} m)`);
+    // Put the street address in the Start box (full address below it and on the receipt)
+    const address = provider.reverse ? await provider.reverse(pos).catch(() => null) : null;
+    if (points.start !== pos) return; // user picked another start meanwhile
+    if (address) {
+      setPoint('start', pos, `${address} (my location, ±${accuracy} m)`);
+      $('startSearch').value = address.split(',').slice(0, 3).map((t) => t.trim()).join(', ');
+    } else {
+      $('startSearch').value = `My location (${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)})`;
     }
   } catch (err) {
     mapError(locationErrorMessage(err));

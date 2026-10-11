@@ -5,6 +5,7 @@
 function pdfSafe(str) {
   return String(str ?? '')
     .replace(/[—–]/g, '-')
+    .replace(/±/g, '+/-')
     .replace(/[^\x20-\x7E]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
