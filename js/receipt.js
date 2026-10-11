@@ -1,5 +1,5 @@
 // Builds a receipt-style PDF (80mm wide, like a thermal slip) with jsPDF.
-// trip = { mode: 'map' | 'meter', from, to, startMeter, endMeter, distanceKm, mins, waitingMins, passenger, date }
+// trip = { mode: 'map' | 'meter', vehicleName, from, to, startMeter, endMeter, distanceKm, mins, waitingMins, passenger, date }
 
 // jsPDF's built-in font only supports basic Latin characters
 function pdfSafe(str) {
@@ -11,9 +11,11 @@ function pdfSafe(str) {
     .trim();
 }
 
-function receiptNumber(d) {
+// e.g. CAR-20261011-184614: vehicle type (first 3 letters) + date + time
+function receiptNumber(d, vehicleName) {
   const p = (n) => String(n).padStart(2, '0');
-  return `TR-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const code = String(vehicleName || '').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'TR';
+  return `${code}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 function createReceiptPdf(trip, s = loadSettings()) {
@@ -68,19 +70,20 @@ function createReceiptPdf(trip, s = loadSettings()) {
     y += 1;
     center('TRIP RECEIPT', 9, false);
     if (s.driverName) center(`Driver: ${s.driverName}`, 8, false);
-    if (s.vehicleNo) center(`Vehicle: ${s.vehicleNo}`, 8, false);
+    if (s.vehicleNo) center(`Vehicle No: ${s.vehicleNo}`, 8, false);
     if (s.driverPhone) center(`Tel: ${s.driverPhone}`, 8, false);
     divider();
 
     // Receipt info
     const d = trip.date;
-    row('Receipt No', receiptNumber(d));
+    row('Receipt No', receiptNumber(d, trip.vehicleName));
     row('Date', d.toLocaleDateString('en-GB'));
     row('Time', d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
     if (pdfSafe(trip.passenger)) row('Passenger', trip.passenger);
     divider();
 
     // Trip
+    if (trip.vehicleName) row('Vehicle type', trip.vehicleName);
     if (trip.mode === 'map') {
       block('FROM', trip.from);
       block('TO', trip.to);
@@ -122,5 +125,5 @@ function createReceiptPdf(trip, s = loadSettings()) {
   const doc = new jsPDF({ unit: 'mm', format: [W, Math.max(height, 90)] });
   render(doc, true);
 
-  return { doc, fileName: `${receiptNumber(trip.date)}.pdf` };
+  return { doc, fileName: `${receiptNumber(trip.date, trip.vehicleName)}.pdf` };
 }

@@ -2,8 +2,10 @@
 //   cost per km   = fuel + servicing + tyres + repairs + depreciation + fixed costs (+ driver income, new)
 //   charge per km = cost per km × (1 + profit margin) × (1 + empty return allowance)
 //   trip fare     = max(km × charge per km, minimum fare) + waiting + tolls + parking + night charge
-// Each vehicle type keeps its own figures on this phone.
-// Used by admin.js:  CostCalc.init({ getCurrent, onApply })  and  CostCalc.refresh()
+// Each vehicle type keeps its own figures on this phone. Changes calculate straight away but are only
+// kept when "Save vehicle costs" is pressed; "Defaults" loads the config.json figures (then Save).
+// Used by admin.js:  CostCalc.init({ getCurrent(vehicle), getSaved(vehicle), onSave(perKm, vehicle), openFareTab(vehicle) })
+//                    and CostCalc.refresh()
 const CostCalc = (() => {
   const el = (id) => document.getElementById(id);
   const STORE_KEY = 'tuktuk_cost_calc_v2';
@@ -13,10 +15,9 @@ const CostCalc = (() => {
   let defaultVehicle = 'tuktuk';
 
   async function loadConfig() {
-    const res = await fetch('config.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error('config.json not found');
-    const cfg = (await res.json()).costCalculator;
-    VEHICLES = cfg.vehicles;
+    const cfg = await loadAppConfig();
+    VEHICLES = Object.fromEntries(Object.entries(cfg.vehicles).filter(([, v]) => v.costDefaults));
+    if (!Object.keys(VEHICLES).length) throw new Error('no cost figures in config.json');
     defaultVehicle = VEHICLES[cfg.defaultVehicle] ? cfg.defaultVehicle : Object.keys(VEHICLES)[0];
   }
 
@@ -47,9 +48,18 @@ const CostCalc = (() => {
   const ALL_FIELDS = COST_FIELDS.concat(TRIP_FIELDS);
   const fid = (id) => 'cc_' + id; // input ids, kept apart from the Settings form ids
 
-  let store = { vehicle: '', figures: {} };
-  let hooks = { getCurrent: () => ({ perKm: 0, source: '' }), onApply: () => {} };
-  let lastCharge = 0;
+  let store = { vehicle: '', figures: {}, rounding: {} };
+  let hooks = { getCurrent: () => ({ perKm: 0, source: '' }), getSaved: () => null, onSave: () => {}, openFareTab: () => {} };
+  let lastPerKm = 0;
+  let defaultsLoaded = false; // "Defaults" pressed and not saved yet
+
+  // Rounding of the calculated per km price, per vehicle type: nearest / down (floor) / up (ceiling), to Rs. 1, 5 or 10
+  const roundingFor = (v) => ({ mode: 'nearest', to: 1, ...(store.rounding[v] || {}) });
+  function roundPrice(value, { mode, to }) {
+    const steps = Math.round((value / to) * 1e6) / 1e6; // ignore float noise like 50.00000001
+    const n = mode === 'down' ? Math.floor(steps) : mode === 'up' ? Math.ceil(steps) : Math.round(steps);
+    return n * to;
+  }
 
   const s = () => loadSettings();
   const money = (n) => formatMoney(Math.round(n * 100) / 100, s());
@@ -59,14 +69,45 @@ const CostCalc = (() => {
   function load() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-      if (saved) store = { vehicle: VEHICLES[saved.vehicle] ? saved.vehicle : defaultVehicle, figures: saved.figures || {} };
+      if (saved) store = { vehicle: VEHICLES[saved.vehicle] ? saved.vehicle : defaultVehicle, figures: saved.figures || {}, rounding: saved.rounding || {} };
       else store.vehicle = defaultVehicle;
     } catch (e) { /* storage blocked */ }
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* storage blocked */ }
   }
-  const figuresFor = (v) => ({ ...VEHICLES[v].defaults, ...(store.figures[v] || {}) });
+  const figuresFor = (v) => ({ ...VEHICLES[v].costDefaults, ...(store.figures[v] || {}) });
+  const readRounding = () => ({ mode: el('ccRoundMode').value, to: Number(el('ccRoundTo').value) });
+
+  // Form differs from what is saved for this vehicle type?
+  function isDirty() {
+    if (!el('cc_fuelPrice')) return false;
+    const form = readFigures(), saved = figuresFor(store.vehicle);
+    return ALL_FIELDS.some((f) => form[f.id] !== Number(saved[f.id] ?? 0)) ||
+      JSON.stringify(readRounding()) !== JSON.stringify(roundingFor(store.vehicle));
+  }
+
+  function saveFigures() {
+    store.figures[store.vehicle] = readFigures();
+    store.rounding[store.vehicle] = readRounding();
+    defaultsLoaded = false;
+    save();
+  }
+
+  function showFiguresStatus() {
+    const dirty = isDirty();
+    const name = VEHICLES[store.vehicle].name;
+    const text = defaultsLoaded && dirty ? `Default ${name} figures loaded — press Save to keep them.`
+      : dirty ? '● Unsaved changes — press Save to keep them.' : `✓ ${name} figures saved.`;
+    document.querySelectorAll('.cc-figures-status').forEach((p) => {
+      p.textContent = text;
+      p.classList.toggle('unsaved', dirty);
+    });
+    document.querySelectorAll('.cc-save-figures').forEach((b) => {
+      b.disabled = !dirty;
+      b.textContent = dirty ? `💾 Save ${name} costs` : '✓ Saved';
+    });
+  }
 
   // ---------- Form ----------
   function buildInputs(fields, containerId) {
@@ -124,10 +165,11 @@ const CostCalc = (() => {
   // ---------- Draw ----------
   function render() {
     const x = readFigures();
-    store.figures[store.vehicle] = x;
-    save();
     const r = calculate(x);
-    lastCharge = r.chargePerKm;
+    const perKm = roundPrice(r.chargePerKm, readRounding());
+    showFiguresStatus();
+    lastPerKm = perKm;
+    el('ccRounded').textContent = money(perKm);
 
     const rate = el('ccRateTable');
     rate.innerHTML = '';
@@ -137,7 +179,7 @@ const CostCalc = (() => {
     rate.appendChild(row(`+ Empty return (+${x.emptyPct}%)`, money(r.chargePerKm), '', true));
     el('ccChargePerKm').textContent = money(r.chargePerKm);
 
-    const cur = hooks.getCurrent();
+    const cur = hooks.getCurrent(store.vehicle);
     const diff = cur.perKm - r.chargePerKm;
     const pct = r.chargePerKm > 0 ? Math.round((diff / r.chargePerKm) * 100) : 0;
     el('ccCompare').textContent = r.chargePerKm > 0
@@ -159,14 +201,16 @@ const CostCalc = (() => {
     trip.appendChild(row('Total fare', money(r.totalFare)));
     trip.appendChild(row('Amount to quote the passenger', money(r.quote), '', true));
 
-    const perKm = Math.round(r.chargePerKm);
-    const applied = Number(s().perKmOverride);
-    el('ccApplyBtn').textContent = applied === perKm ? `✓ ${money(perKm)} per km is applied` : `✅ Apply ${money(perKm)} as the per km price`;
-    el('ccApplyBtn').disabled = !(perKm > 0) || applied === perKm;
-    el('ccApplyInfo').textContent =
-      `Calculated ${money(r.chargePerKm)}, rounded to ${money(perKm)}. Applying it replaces the ` +
-      `${cur.online ? 'online (API)' : "Admin"} per km price on this phone, until you press "Reset to API price" in Settings.` +
-      ` Fuel adjustment is not added on top, because fuel is already in this calculation.`;
+    const name = VEHICLES[store.vehicle].name;
+    const saved = Number(hooks.getSaved(store.vehicle));
+    el('ccSaveBtn').textContent = saved === perKm
+      ? `✓ ${money(perKm)} is saved as the ${name} cost per km price` : `💾 Save ${money(perKm)} as the ${name} cost per km price`;
+    el('ccSaveBtn').disabled = !(perKm > 0) || saved === perKm;
+    el('ccSaveInfo').textContent =
+      (saved > 0 && saved !== perKm ? `Saved now: ${money(saved)}. ` : '') +
+      `To charge it instead of the ${cur.online ? 'online (API)' : 'Admin'} price, tick "Use cost per km price" in Settings → Fare rates → ${name}.`;
+    el('ccOpenFareBtn').textContent = `Open the ${VEHICLES[store.vehicle].icon || ''} ${name} fare rates`.replace('  ', ' ');
+    el('ccOpenFareBtn').classList.toggle('hidden', !(saved > 0));
   }
 
   // ---------- Setup ----------
@@ -192,29 +236,54 @@ const CostCalc = (() => {
       el('costPanel').addEventListener('input', (e) => { if (e.target.id !== 'ccVehicle') render(); });
 
       el('ccVehicle').addEventListener('change', () => {
-        store.vehicle = el('ccVehicle').value;
+        const next = el('ccVehicle').value;
+        if (isDirty() && !confirm(`You have unsaved ${VEHICLES[store.vehicle].name} figures. Switch to ${VEHICLES[next].name} without saving them?`)) {
+          el('ccVehicle').value = store.vehicle; // stay
+          return;
+        }
+        store.vehicle = next;
+        defaultsLoaded = false;
+        save(); // remember the vehicle type only
         fillFigures(figuresFor(store.vehicle));
+        fillRounding();
         render();
       });
-      el('ccResetBtn').addEventListener('click', () => {
+      document.querySelectorAll('.cc-save-figures').forEach((b) => b.addEventListener('click', () => {
+        saveFigures();
+        render();
+      }));
+      document.querySelectorAll('.cc-defaults').forEach((b) => b.addEventListener('click', () => {
         const name = VEHICLES[store.vehicle].name;
-        if (!confirm(`Replace your ${name} figures with the default ${name} figures?`)) return;
-        delete store.figures[store.vehicle];
-        fillFigures(figuresFor(store.vehicle));
+        if (!confirm(`Load the default ${name} figures? Your changes are kept only if you press Save after this.`)) return;
+        fillFigures(VEHICLES[store.vehicle].costDefaults);
+        el('ccRoundMode').value = 'nearest';
+        el('ccRoundTo').value = '1';
+        defaultsLoaded = true;
+        render();
+      }));
+      // leaving the page with unsaved figures
+      window.addEventListener('beforeunload', (e) => {
+        if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+      });
+      el('ccSaveBtn').addEventListener('click', () => {
+        if (!(lastPerKm > 0)) return;
+        if (isDirty()) saveFigures(); // the saved price always matches the saved figures
+        hooks.onSave(lastPerKm, store.vehicle);
         render();
       });
-      el('ccApplyBtn').addEventListener('click', () => {
-        const perKm = Math.round(lastCharge);
-        if (!(perKm > 0)) return;
-        if (!confirm(`Use ${money(perKm)} as the per km price on this phone?`)) return;
-        hooks.onApply(perKm);
-        render();
-      });
+      el('ccOpenFareBtn').addEventListener('click', () => hooks.openFareTab(store.vehicle));
     }
     load();
     el('ccVehicle').value = store.vehicle;
     fillFigures(figuresFor(store.vehicle));
+    fillRounding();
     render();
+  }
+
+  function fillRounding() {
+    const r = roundingFor(store.vehicle);
+    el('ccRoundMode').value = r.mode;
+    el('ccRoundTo').value = String(r.to);
   }
 
   return { init, refresh: () => el('cc_fuelPrice') && render() };

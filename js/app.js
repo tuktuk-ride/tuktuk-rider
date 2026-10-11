@@ -1,4 +1,8 @@
-let settings = loadSettings();
+const adminSettings = loadSettings();               // this phone's settings
+let rateSet = { main: null, vehicles: {} };          // online rates file
+let appConfig = FALLBACK_CONFIG;                     // vehicle types (config.json)
+let currentVehicle = appConfig.defaultVehicle;
+let settings = adminSettings;                        // fare settings of the selected vehicle type
 const $ = (id) => document.getElementById(id);
 
 // ---------- Rates (online file first, admin settings as fallback) ----------
@@ -22,15 +26,43 @@ function showRateInfo(source) {
   $('waitingInfo').textContent = `Charged at ${formatMoney(waitingRate(settings), settings)} per hour.`;
 }
 
+// ---------- Vehicle type ----------
+// Types ticked in Admin, in config.json order (at least the main type)
+function enabledVehicles() {
+  const ticked = Object.keys(appConfig.vehicles).filter((k) => (adminSettings.enabledVehicles || []).includes(k));
+  return ticked.length ? ticked : [appConfig.defaultVehicle];
+}
+
+function applyVehicle(key, remember = true) {
+  currentVehicle = key;
+  settings = vehicleSettings(adminSettings, key, appConfig, rateSet);
+  const changed = Object.keys((adminSettings.localOverrides || {})[key] || {}).length;
+  const online = vehicleOnline(key, appConfig, rateSet);
+  showRateInfo(online
+    ? (changed ? '✓ Official online rates, with figures changed on this phone' : '✓ Official online rates')
+    : (changed ? "Using this phone's rates" : 'Using the default rates'));
+  if (lastTrip && !$('resultCard').classList.contains('hidden')) renderResult(); // same trip, this vehicle's rates
+  if (remember) saveSettings({ ...loadSettings(), selectedVehicle: key });
+}
+
+$('vehicleSelect').addEventListener('change', () => applyVehicle($('vehicleSelect').value));
+
 $('rateInfo').textContent = 'Loading rates…';
 // Every fare calculation waits for this, so a fare is never worked out with the wrong rates.
-const ratesReady = fetchOnlineRates().then((online) => {
-  if (online) {
-    settings = { ...settings, ...online };
-    showRateInfo('✓ Official online rates');
-  } else {
-    showRateInfo("Using this device's admin rates");
-  }
+const ratesReady = Promise.all([fetchOnlineRateSet(), loadAppConfig()]).then(([set, cfg]) => {
+  rateSet = set;
+  appConfig = cfg;
+  const keys = enabledVehicles();
+  $('vehicleSelect').innerHTML = '';
+  keys.forEach((k) => {
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = vehicleLabel(appConfig, k);
+    $('vehicleSelect').appendChild(opt);
+  });
+  const start = keys.includes(adminSettings.selectedVehicle) ? adminSettings.selectedVehicle : keys[0];
+  $('vehicleSelect').value = start;
+  applyVehicle(start, false);
 });
 
 // ---------- Tabs ----------
@@ -70,8 +102,9 @@ function showResult(distanceKm, durationText, trip) {
 
 function renderResult() {
   lastTrip.waitingMins = getWaitingMins();
+  lastTrip.vehicleName = (appConfig.vehicles[currentVehicle] || {}).name || currentVehicle;
   const f = calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins);
-  $('resultDistance').textContent = `Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
+  $('resultDistance').textContent = `${vehicleLabel(appConfig, currentVehicle)}  •  Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
     (settings.roundUpKm ? ` (charged as ${f.km} km)` : '') +
     (f.waitMins ? `  •  Waiting: ${formatWaiting(f.waitMins)}` : '');
   $('resultTotal').textContent = formatMoney(f.total, settings);

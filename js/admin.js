@@ -1,188 +1,347 @@
 const $ = (id) => document.getElementById(id);
-const FIELDS = ['minimumFare', 'perKmRate', 'currency', 'googleApiKey', 'adminPin',
-                'driverName', 'vehicleNo', 'driverPhone'];
-// Waiting charge fields (waitingEnabled is a checkbox)
-const WAITING_FIELDS = ['waitingEnabled', 'waitingPerHour'];
-const FUEL_FIELDS = ['fuelPrice', 'baseFuelPrice', 'fuelStep', 'fuelStepChange', 'fuelMinPerKm', 'fuelMaxPerKm', 'kmPerLiter'];
+
+// Settings shared by all vehicle types
+const SHARED_FIELDS = ['currency', 'googleApiKey', 'adminPin', 'driverName', 'driverPhone'];
+
+// Figures each vehicle type has. Their default is the value in the online rates file (that type's block),
+// else the default; any of them can be changed on this phone (saved in settings.localOverrides).
+const RATE_FIELDS = [
+  { id: 'minimumFare', label: 'Minimum fare', group: 'fare' },
+  { id: 'perKmRate', label: 'Per km price', group: 'fare' },
+  { id: 'roundUpKm', label: 'Charge partial km as a full km (e.g. 3.2 km → 4 km)', group: 'fare', check: true },
+  { id: 'waitingEnabled', label: 'Charge for waiting time', group: 'waiting', check: true },
+  { id: 'waitingPerHour', label: 'Waiting charge per hour', group: 'waiting' },
+  { id: 'fuelEnabled', label: 'Adjust the per km price by fuel price', group: 'fuel', check: true },
+  { id: 'fuelPrice', label: 'Current fuel price (per litre)', group: 'fuel', note: 'Update this when the fuel price changes' },
+  { id: 'baseFuelPrice', label: 'Base fuel price', group: 'fuel', note: 'The fuel price the per km price was set at' },
+  { id: 'fuelStep', label: 'For every fuel change of Rs.', group: 'fuel' },
+  { id: 'fuelStepChange', label: 'Per km price changes by Rs.', group: 'fuel' },
+  { id: 'fuelMinPerKm', label: 'Per km lowest price', group: 'fuel', note: 'The fuel change never goes below this…' },
+  { id: 'fuelMaxPerKm', label: 'Per km highest price', group: 'fuel', note: '…or above this' },
+  { id: 'kmPerLiter', label: 'Km per litre', group: 'fuel', note: 'Info only: shows the fuel cost per km' }
+];
+
+let appConfig = FALLBACK_CONFIG;
+let rateSet = { main: null, vehicles: {} }; // online rates file
+let activeFareTab = '';
+const vehicleKeys = () => Object.keys(appConfig.vehicles);
+const vname = (key) => appConfig.vehicles[key].name;
+const fid = (key, id) => `f_${key}_${id}`;
+const panelId = (key) => `fpanel_${key}`;
+const isOnline = (key) => vehicleOnline(key, appConfig, rateSet);
 
 function toast(msg) {
   $('toast').textContent = msg;
   $('toast').classList.add('show');
-  setTimeout(() => $('toast').classList.remove('show'), 2000);
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => $('toast').classList.remove('show'), 2500);
 }
 
-function fillForm(s) {
-  FIELDS.concat(FUEL_FIELDS).forEach((f) => ($(f).value = s[f]));
-  $('roundUpKm').checked = !!s.roundUpKm;
-  $('fuelEnabled').checked = !!s.fuelEnabled;
-  $('waitingEnabled').checked = !!s.waitingEnabled;
-  $('waitingPerHour').value = s.waitingPerHour;
+// ---------- Values of one vehicle type ----------
+const localFor = (s, key) => (s.localOverrides || {})[key] || {};
+// Settings in use now (API / default + this phone's changes)
+const usedSettings = (key) => vehicleSettings(loadSettings(), key, appConfig, rateSet);
+// Settings without this phone's changes (= API value, else default)
+const referenceSettings = (key) => vehicleSettings({ ...loadSettings(), localOverrides: {} }, key, appConfig, rateSet);
+
+// 'local' (changed on this phone) | 'api' | 'default'
+function sourceOf(key, id) {
+  if (localFor(loadSettings(), key)[id] !== undefined) return 'local';
+  const block = onlineBlock(key, appConfig, rateSet);
+  return block && block[id] !== undefined ? 'api' : 'default';
+}
+
+function readVehicleInputs(key) {
+  return Object.fromEntries(RATE_FIELDS.map((f) => {
+    const el = $(fid(key, f.id));
+    return [f.id, f.check ? el.checked : parseFloat(el.value)];
+  }));
+}
+
+// Form values merged over what is in use (for live examples before saving)
+const formSettings = (key) => ({ ...usedSettings(key), ...readVehicleInputs(key) });
+
+// ---------- Build the vehicle type checks + one tab panel per type ----------
+function buildVehicleUi() {
+  $('vehicleChecks').innerHTML = '';
+  $('vehiclePanels').innerHTML = '';
+  vehicleKeys().forEach((key) => {
+    const label = document.createElement('label');
+    label.className = 'check';
+    label.innerHTML = `<input type="checkbox" id="vt_${key}"> <span></span>`;
+    label.querySelector('span').textContent = vehicleLabel(appConfig, key);
+    $('vehicleChecks').appendChild(label);
+    label.querySelector('input').addEventListener('change', renderFareTabs);
+
+    const fieldHtml = (f) => f.check
+      ? `<div class="field"><label class="check"><input type="checkbox" id="${fid(key, f.id)}"> <span class="flabel"></span></label>
+           <div class="src-line" id="src_${key}_${f.id}"></div></div>`
+      : `<div class="field"><label for="${fid(key, f.id)}" class="flabel"></label>
+           <input type="number" id="${fid(key, f.id)}" inputmode="decimal" min="0" step="any">
+           <div class="src-line" id="src_${key}_${f.id}"></div>
+           ${f.note ? '<p class="hint fnote"></p>' : ''}</div>`;
+    const group = (g) => RATE_FIELDS.filter((f) => f.group === g).map(fieldHtml).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'fare-panel hidden';
+    panel.id = panelId(key);
+    panel.innerHTML = `
+      <div class="notice" id="fnotice_${key}"></div>
+      ${group('fare')}
+      <div><label for="vno_${key}" class="vno-label"></label>
+        <input type="text" id="vno_${key}" maxlength="20" placeholder="e.g. WP ABC-1234" autocomplete="off"></div>
+      <div class="calc-price" id="calcSlot_${key}">
+        <label class="check"><input type="checkbox" id="usecalc_${key}"> <span id="usecalcText_${key}"></span></label>
+        <p class="hint" id="usecalcHint_${key}"></p>
+      </div>
+      <h3 class="sub">⏱ Waiting charge</h3>
+      ${group('waiting')}
+      <p class="hint" id="wex_${key}"></p>
+      <details class="fuel-box" id="fuelbox_${key}">
+        <summary>⛽ Fuel adjustment <span class="fuel-sum" id="fsum_${key}"></span></summary>
+        ${group('fuel')}
+        <div class="notice" id="fuelinfo_${key}"></div>
+      </details>
+      <p class="hint" id="fex_${key}"></p>
+      <button class="btn small secondary" type="button" id="fapi_${key}"></button>`;
+    RATE_FIELDS.forEach((f) => {
+      const wrap = panel.querySelector(`#${fid(key, f.id)}`).closest('.field');
+      wrap.querySelector('.flabel').textContent = f.label;
+      if (f.note) wrap.querySelector('.fnote').textContent = f.note;
+    });
+    panel.querySelector('.vno-label').textContent = `Vehicle No (on ${vname(key)} receipts)`;
+    $('vehiclePanels').appendChild(panel);
+
+    $(`usecalc_${key}`).addEventListener('change', (e) => setUseCalculated(key, e.target.checked));
+    $(`fapi_${key}`).addEventListener('click', () => useApiValues(key));
+  });
+}
+
+// ---------- Tabs: one per ticked vehicle type ----------
+function renderFareTabs() {
+  const ticked = vehicleKeys().filter((key) => $(`vt_${key}`).checked);
+  const keys = ticked.length ? ticked : [appConfig.defaultVehicle];
+  if (!keys.includes(activeFareTab)) activeFareTab = keys[0];
+  $('fareTabs').innerHTML = '';
+  keys.forEach((key) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tab' + (key === activeFareTab ? ' active' : '');
+    b.textContent = vehicleLabel(appConfig, key);
+    b.addEventListener('click', () => { activeFareTab = key; renderFareTabs(); });
+    $('fareTabs').appendChild(b);
+  });
+  $('fareTabs').classList.toggle('hidden', keys.length < 2);
+  vehicleKeys().forEach((key) => $(panelId(key)).classList.toggle('hidden', key !== activeFareTab));
+}
+
+function showFareTab(key) {
+  if (!$(`vt_${key}`).checked) {
+    $(`vt_${key}`).checked = true;
+    toast(`${vname(key)} ticked in Vehicle types — press Save settings to keep it`);
+  }
+  activeFareTab = key;
+  renderFareTabs();
+  showPanel('settingsForm');
+  $('fareTabs').scrollIntoView({ block: 'start' });
+}
+
+// ---------- Fill / show ----------
+function fillVehicle(key) {
+  const used = usedSettings(key);
+  RATE_FIELDS.forEach((f) => {
+    const el = $(fid(key, f.id));
+    if (f.check) el.checked = !!used[f.id];
+    else el.value = Number.isFinite(Number(used[f.id])) ? used[f.id] : '';
+  });
+  showSources(key);
+  updateLive(key);
+}
+
+// "API" / "Default" / "Changed on this phone ↩" under each field + the panel notice
+function showSources(key) {
+  const ref = referenceSettings(key);
+  const s = loadSettings();
+  const block = onlineBlockName(key, appConfig);
+  const refName = isOnline(key) ? 'API' : 'default';
+  RATE_FIELDS.forEach((f) => {
+    const line = $(`src_${key}_${f.id}`);
+    const src = sourceOf(key, f.id);
+    const refText = f.check ? (ref[f.id] ? 'on' : 'off') : formatMoney(ref[f.id], s).replace(s.currency + ' ', '');
+    line.innerHTML = '';
+    line.className = 'src-line src-' + src;
+    if (src === 'local') {
+      line.append(`✎ Changed on this phone (${refName}: ${refText}) `);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'src-reset';
+      b.textContent = `↩ ${refName === 'API' ? 'API' : 'Default'} value`;
+      b.addEventListener('click', () => resetField(key, f.id));
+      line.append(b);
+    } else {
+      line.textContent = src === 'api' ? `API (${block})` : 'Default';
+    }
+  });
+
+  const changed = Object.keys(localFor(s, key)).length;
+  const state = onlineBlockState(key, appConfig, rateSet);
+  $(`fnotice_${key}`).textContent =
+    (rateSet.reachable === false ? "The online rates file can't be reached right now (no internet, or the file has an error), so the defaults are used."
+      : state === 'active' ? `✓ Default values come from the "${block}" block of the online rates file.`
+      : state === 'stopped' ? `The "${block}" block in the online rates file is stopped (IS_STOPPED true), so the defaults are used.`
+        : `No "${block}" block in the online rates file, so the defaults are used.`) +
+    (changed ? ` ✎ ${changed} figure${changed > 1 ? 's' : ''} changed on this phone.` : '');
+  $(`fapi_${key}`).textContent = `↩ Use the ${refName} values for ${vname(key)}`;
+  $(`fapi_${key}`).disabled = !changed;
+}
+
+// Examples, waiting example and fuel summary from what is typed (before saving)
+function updateLive(key) {
+  const s = formSettings(key);
+  const money = (n) => formatMoney(n, s);
+  const ex = (km) => `${km} km = ${money(calculateFare(km, s).total)}`;
+  $(`fex_${key}`).textContent = isNaN(s.minimumFare) || isNaN(s.perKmRate) ? '' : `Examples: ${ex(1)} • ${ex(5)} • ${ex(10.5)}`;
+  $(`wex_${key}`).textContent = waitingRate(s)
+    ? `Example: 25 min waiting = ${money(((25 / 60) * waitingRate(s)).toFixed(2))} • 1 h = ${money(waitingRate(s))}` : 'Waiting charge is off.';
+
+  const info = $(`fuelinfo_${key}`);
+  let summary = '';
+  info.innerHTML = '';
+  if (s.perKmOverride > 0) {
+    summary = 'not used (cost per km price)';
+    info.textContent = `Fuel adjustment is not used while the cost per km price (${money(s.perKmOverride)}) is ticked.`;
+  } else if (!s.fuelEnabled) {
+    summary = 'off';
+    info.textContent = 'Fuel adjustment is off: the per km price is not changed by the fuel price.';
+  } else if (['fuelPrice', 'fuelStep', 'baseFuelPrice', 'perKmRate'].some((f) => !(s[f] > 0))) {
+    summary = '';
+  } else {
+    const adj = fuelAdjustment(s);
+    const charged = effectivePerKmRate(s);
+    const change = charged - s.perKmRate;
+    const sign = (n) => (n < 0 ? '-' : '+');
+    const lowBand = Math.floor(s.fuelPrice / s.fuelStep) * s.fuelStep;
+    let note = '';
+    if (s.perKmRate < s.fuelMinPerKm || s.perKmRate > s.fuelMaxPerKm) note = ' (per km price is outside the limits, so no fuel change)';
+    else if (change !== adj) note = ` (limited to ${money(change > 0 || adj > 0 ? s.fuelMaxPerKm : s.fuelMinPerKm)})`;
+    summary = change ? `${sign(change)}${money(Math.abs(change))} per km` : 'no change now';
+    [
+      s.kmPerLiter > 0 ? `Fuel cost per km: ${money((s.fuelPrice / s.kmPerLiter).toFixed(2))}` : 'Fuel cost per km: - (km per litre not set)',
+      `Fuel band: ${lowBand} – ${lowBand + s.fuelStep - 0.01} → per km ${sign(adj)} ${money(Math.abs(adj))}`,
+      `Per km price charged: ${money(s.perKmRate)} ${sign(change)} ${money(Math.abs(change))} = ${money(charged)}${note}`
+    ].forEach((t) => { const d = document.createElement('div'); d.textContent = t; info.appendChild(d); });
+  }
+  $(`fsum_${key}`).textContent = summary ? `— ${summary}` : '';
+}
+
+function fillForm() {
+  const s = loadSettings();
+  SHARED_FIELDS.forEach((f) => ($(f).value = s[f] ?? ''));
   const radio = document.querySelector(`input[name="mapProvider"][value="${s.mapProvider}"]`) ||
                 document.querySelector('input[name="mapProvider"][value="osm"]');
   radio.checked = true;
-  updateExample();
+  const enabled = (s.enabledVehicles || []).length ? s.enabledVehicles : [appConfig.defaultVehicle];
+  vehicleKeys().forEach((key) => {
+    $(`vt_${key}`).checked = enabled.includes(key);
+    $(`vno_${key}`).value = (s.vehicleNumbers || {})[key] || '';
+    fillVehicle(key);
+  });
+  renderFareTabs();
+  updateCalcBoxes();
   updateMapBox();
-}
-
-function readForm() {
-  return {
-    minimumFare: parseFloat($('minimumFare').value),
-    perKmRate: parseFloat($('perKmRate').value),
-    currency: $('currency').value.trim() || 'Rs.',
-    googleApiKey: $('googleApiKey').value.trim(),
-    adminPin: $('adminPin').value.trim(),
-    driverName: $('driverName').value.trim(),
-    vehicleNo: $('vehicleNo').value.trim(),
-    driverPhone: $('driverPhone').value.trim(),
-    roundUpKm: $('roundUpKm').checked,
-    fuelEnabled: $('fuelEnabled').checked,
-    waitingEnabled: $('waitingEnabled').checked,
-    waitingPerHour: parseFloat($('waitingPerHour').value),
-    ...Object.fromEntries(FUEL_FIELDS.map((f) => [f, parseFloat($(f).value)])),
-    mapProvider: document.querySelector('input[name="mapProvider"]:checked').value,
-    perKmOverride: loadSettings().perKmOverride // only changed by the Cost per km tab / reset button
-  };
 }
 
 // Only show the API key field when Google Maps is selected
 function updateMapBox() {
-  $('googleKeyBox').classList.toggle('hidden', readForm().mapProvider !== 'google');
+  $('googleKeyBox').classList.toggle('hidden', document.querySelector('input[name="mapProvider"]:checked').value !== 'google');
 }
 
-// Shows what the fuel figures do to the per km price
-function updateFuelSummary() {
-  const s = readForm();
-  if (Number(s.perKmOverride) > 0) {
-    return ($('fuelSummary').textContent = `Fuel adjustment is not used while the cost calculator price (${formatMoney(s.perKmOverride, s)} per km) is applied.`);
-  }
-  if (!s.fuelEnabled) return ($('fuelSummary').textContent = 'Fuel adjustment is off: per km price is not changed by fuel price.');
-  if (FUEL_FIELDS.some((f) => !(s[f] >= 0)) || isNaN(s.perKmRate)) return ($('fuelSummary').textContent = '');
-  const adj = fuelAdjustment(s);
-  const charged = effectivePerKmRate(s);
-  const applied = charged - s.perKmRate;
-  const sign = (n) => (n < 0 ? '-' : '+');
-  const lowBand = Math.floor(s.fuelPrice / s.fuelStep) * s.fuelStep;
-  let note = '';
-  if (s.perKmRate < s.fuelMinPerKm || s.perKmRate > s.fuelMaxPerKm) note = ' (per km price is outside the limits, so no fuel change)';
-  else if (applied !== adj) note = ` (limited to ${formatMoney(applied > 0 || adj > 0 ? s.fuelMaxPerKm : s.fuelMinPerKm, s)})`;
-  $('fuelSummary').innerHTML = '';
-  [
-    s.kmPerLiter > 0 ? `Fuel cost per km: ${formatMoney((s.fuelPrice / s.kmPerLiter).toFixed(2), s)}` : 'Fuel cost per km: - (km per liter not set)',
-    `Fuel band: ${lowBand} – ${lowBand + s.fuelStep - 0.01} → per km ${sign(adj)} ${formatMoney(Math.abs(adj), s)}`,
-    `Per km price charged: ${formatMoney(s.perKmRate, s)} ${sign(applied)} ${formatMoney(Math.abs(applied), s)} = ${formatMoney(charged, s)}${note}`
-  ].forEach((t) => { const d = document.createElement('div'); d.textContent = t; $('fuelSummary').appendChild(d); });
+// ---------- Back to the API values ----------
+function saveLocal(key, local) {
+  const s = loadSettings();
+  s.localOverrides = { ...(s.localOverrides || {}), [key]: local };
+  if (!Object.keys(local).length) delete s.localOverrides[key];
+  return saveSettings(s);
 }
 
-// e.g. "Example: 25 min waiting = Rs. 125"
-function updateWaitingExample() {
-  const s = readForm();
-  $('waitingExample').textContent = waitingRate(s)
-    ? `Example: 25 min waiting = ${formatMoney(((25 / 60) * waitingRate(s)).toFixed(2), s)} • 1 h = ${formatMoney(waitingRate(s), s)}`
-    : 'Waiting charge is off.';
+function resetField(key, id) {
+  const local = { ...localFor(loadSettings(), key) };
+  delete local[id];
+  if (!saveLocal(key, local)) return toast('❌ This browser blocks saving (private mode?)');
+  const f = RATE_FIELDS.find((x) => x.id === id);
+  const used = usedSettings(key);
+  if (f.check) $(fid(key, id)).checked = !!used[id]; else $(fid(key, id)).value = used[id];
+  showSources(key);
+  updateLive(key);
+  updateCalcBoxes();
+  CostCalc.refresh();
+  toast(`↩ ${vname(key)}: "${f.label}" back to the ${isOnline(key) ? 'API' : 'default'} value`);
 }
 
-// Live example so admin can see the effect of the rates
-function updateExample() {
-  updateFuelSummary();
-  updateWaitingExample();
-  const s = readForm();
-  if (isNaN(s.minimumFare) || isNaN(s.perKmRate)) return ($('example').textContent = '');
-  const ex = (km) => `${km} km = ${formatMoney(calculateFare(km, s).total, s)}`;
-  $('example').textContent = `Examples: ${ex(1)} • ${ex(5)} • ${ex(10.5)}`;
-}
-
-// ---------- Online rates ----------
-// When the online rates file is active (IS_STOPPED false), its prices replace the admin ones
-let onlineRates = null;
-
-function applyOnlineRates() {
-  const locked = !!onlineRates;
-  if (locked) {
-    $('minimumFare').value = onlineRates.minimumFare;
-    $('perKmRate').value = onlineRates.perKmRate;
-  }
-  $('minimumFare').disabled = locked;
-  $('perKmRate').disabled = locked;
-  // The tick is only locked if the online file sets ROUND_UP_KM
-  const tickLocked = locked && typeof onlineRates.roundUpKm === 'boolean';
-  if (tickLocked) $('roundUpKm').checked = onlineRates.roundUpKm;
-  $('roundUpKm').disabled = tickLocked;
-  $('onlineRatesNotice').classList.toggle('hidden', !locked);
-
-  // Lock each fuel field the online file provides; the rest stay editable here
-  let anyFuelLocked = false;
-  ['fuelEnabled'].concat(FUEL_FIELDS).forEach((f) => {
-    const fromApi = locked && onlineRates[f] !== undefined;
-    if (fromApi) {
-      if (f === 'fuelEnabled') $(f).checked = onlineRates[f];
-      else $(f).value = onlineRates[f];
-    }
-    $(f).disabled = fromApi;
-    anyFuelLocked = anyFuelLocked || fromApi;
-  });
-  $('onlineFuelNotice').classList.toggle('hidden', !anyFuelLocked);
-
-  // Waiting charge: locked when the online file sets IS_WAITING true
-  let anyWaitingLocked = false;
-  WAITING_FIELDS.forEach((f) => {
-    const fromApi = locked && onlineRates[f] !== undefined;
-    if (fromApi) {
-      if (f === 'waitingEnabled') $(f).checked = onlineRates[f];
-      else $(f).value = onlineRates[f];
-    }
-    $(f).disabled = fromApi;
-    anyWaitingLocked = anyWaitingLocked || fromApi;
-  });
-  $('onlineWaitingNotice').classList.toggle('hidden', !anyWaitingLocked);
-  updateExample();
+function useApiValues(key) {
+  const n = Object.keys(localFor(loadSettings(), key)).length;
+  if (!n || !confirm(`Put all ${n} changed ${vname(key)} figure${n > 1 ? 's' : ''} back to the ${isOnline(key) ? 'API' : 'default'} values?`)) return;
+  if (!saveLocal(key, {})) return toast('❌ This browser blocks saving (private mode?)');
+  fillVehicle(key);
+  updateCalcBoxes();
+  CostCalc.refresh();
+  toast(`↩ ${vname(key)}: using the ${isOnline(key) ? 'API' : 'default'} values`);
 }
 
 // ---------- Per km price from the Cost per km tab ----------
-// What the fare page charges per km now, and where it comes from
-function currentPerKm() {
-  const merged = { ...loadSettings(), ...(onlineRates || {}) };
-  const applied = Number(merged.perKmOverride) > 0;
+function currentPerKm(key) {
+  if (!appConfig.vehicles[key]) key = appConfig.defaultVehicle;
+  const vs = usedSettings(key);
   return {
-    perKm: effectivePerKmRate(merged),
-    source: applied ? 'cost calculator price applied on this phone' : onlineRates ? 'official online rates' : "this phone's admin price",
-    online: !!onlineRates
+    perKm: effectivePerKmRate(vs),
+    source: vs.perKmOverride ? 'cost per km price, ticked in Settings'
+      : sourceOf(key, 'perKmRate') === 'local' ? 'price changed on this phone'
+        : isOnline(key) ? 'official online rates' : 'default price',
+    online: isOnline(key)
   };
 }
 
-function updateOverrideNotice() {
-  const applied = Number(loadSettings().perKmOverride);
-  $('overrideNotice').classList.toggle('hidden', !(applied > 0));
-  if (!(applied > 0)) return;
-  const base = effectivePerKmRate({ ...loadSettings(), ...(onlineRates || {}), perKmOverride: null });
-  $('overrideText').innerHTML = '';
-  const b = document.createElement('b');
-  b.textContent = `🧮 Per km price comes from the cost calculator: ${formatMoney(applied, loadSettings())}`;
-  const p = document.createElement('div');
-  p.textContent = `This phone uses it instead of the ${onlineRates ? 'online (API)' : 'Admin'} per km price (${formatMoney(base, loadSettings())}). ` +
-    'Press Reset to go back to the API price.';
-  $('overrideText').append(b, p);
+// The "Use cost per km price" tick in each fare tab
+function updateCalcBoxes() {
+  const s = loadSettings();
+  vehicleKeys().forEach((key) => {
+    const name = vname(key);
+    const saved = Number((s.perKmCalculated || {})[key]);
+    const used = !!(s.useCalculated || {})[key] && saved > 0;
+    const base = effectivePerKmRate(vehicleSettings({ ...s, useCalculated: {} }, key, appConfig, rateSet));
+    $(`usecalc_${key}`).checked = used;
+    $(`usecalc_${key}`).disabled = !(saved > 0);
+    $(`usecalcText_${key}`).textContent = saved > 0
+      ? `Use the cost per km price (${formatMoney(saved, s)}) instead of the per km price above`
+      : 'Use the cost per km price instead of the per km price above';
+    $(`usecalcHint_${key}`).textContent = !(saved > 0)
+      ? `No ${name} cost per km price saved yet. Work one out in the 🧮 Cost per km tab and press Save.`
+      : used ? `✓ ${name} is charged ${formatMoney(saved, s)} per km on this phone (instead of ${formatMoney(base, s)}). Fuel adjustment is not added.`
+        : `${name} is charged ${formatMoney(base, s)} per km.`;
+    $(`calcSlot_${key}`).classList.toggle('active', used);
+    updateLive(key);
+  });
 }
 
-$('overrideResetBtn').addEventListener('click', () => {
+function setUseCalculated(key, on) {
   const s = loadSettings();
-  s.perKmOverride = null;
+  s.useCalculated = { ...(s.useCalculated || {}), [key]: on };
   if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
-  updateOverrideNotice();
-  updateExample();
+  updateCalcBoxes();
   CostCalc.refresh();
-  toast('↩ Back to the API / Admin per km price');
-});
-
-function applyCalculatorPrice(perKm) {
-  const s = loadSettings();
-  s.perKmOverride = perKm;
-  if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
-  updateOverrideNotice();
-  updateExample();
-  toast(`✅ ${formatMoney(perKm, s)} per km applied. Reset it any time in Settings.`);
+  toast(on ? `✅ ${vname(key)}: using the cost per km price` : `↩ ${vname(key)}: back to the per km price`);
 }
 
-// ---------- Tabs ----------
+function saveCalculatorPrice(perKm, key) {
+  const s = loadSettings();
+  s.perKmCalculated = { ...(s.perKmCalculated || {}), [key]: perKm };
+  if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
+  updateCalcBoxes();
+  const used = (s.useCalculated || {})[key];
+  toast(`💾 ${vname(key)}: ${formatMoney(perKm, s)} saved` + (used ? ' and in use' : ' — tick it in Fare rates to use it'));
+}
+
+// ---------- Admin tabs (Settings / Cost per km) ----------
 function showPanel(id) {
   document.querySelectorAll('#adminTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.panel === id));
   ['settingsForm', 'costPanel'].forEach((p) => $(p).classList.toggle('hidden', p !== id));
@@ -193,59 +352,97 @@ document.querySelectorAll('#adminTabs .tab, [data-goto]').forEach((b) =>
 
 // ---------- Login ----------
 async function login() {
-  if ($('pinInput').value === loadSettings().adminPin) {
-    $('loginCard').classList.add('hidden');
-    $('adminTabs').classList.remove('hidden');
-    $('settingsForm').classList.remove('hidden');
-    fillForm(loadSettings());
-    updateOverrideNotice();
-    // Start the Cost per km tab now; it refreshes once the online rates have loaded
-    CostCalc.init({ getCurrent: currentPerKm, onApply: applyCalculatorPrice });
-    onlineRates = await fetchOnlineRates();
-    applyOnlineRates();
-    updateOverrideNotice();
-    CostCalc.refresh();
-  } else {
+  if ($('pinInput').value !== loadSettings().adminPin) {
     $('loginError').textContent = 'Wrong PIN.';
+    return;
   }
+  $('loginBtn').disabled = true;
+  $('loginError').textContent = 'Loading rates…';
+  // The API values are the defaults shown in the form, so read them first
+  [appConfig, rateSet] = await Promise.all([loadAppConfig(), fetchOnlineRateSet()]);
+  $('loginCard').classList.add('hidden');
+  buildVehicleUi();
+  $('adminTabs').classList.remove('hidden');
+  $('settingsForm').classList.remove('hidden');
+  fillForm();
+  CostCalc.init({
+    getCurrent: currentPerKm,
+    getSaved: (key) => (loadSettings().perKmCalculated || {})[key],
+    onSave: saveCalculatorPrice,
+    openFareTab: showFareTab
+  });
 }
 $('loginBtn').addEventListener('click', login);
 $('pinInput').addEventListener('keydown', (e) => e.key === 'Enter' && login());
 
-// ---------- Save / reset ----------
-$('settingsForm').addEventListener('input', () => { updateExample(); updateMapBox(); });
+// ---------- Live updates ----------
+$('settingsForm').addEventListener('input', (e) => {
+  updateMapBox();
+  const key = vehicleKeys().find((k) => (e.target.id || '').startsWith(`f_${k}_`));
+  if (key) updateLive(key);
+});
+
+// ---------- Save ----------
+const VALIDATION = [
+  ['minimumFare', (v) => v >= 0], ['perKmRate', (v) => v >= 0], ['waitingPerHour', (v) => v >= 0],
+  ['fuelPrice', (v) => v > 0], ['baseFuelPrice', (v) => v > 0], ['fuelStep', (v) => v > 0],
+  ['fuelStepChange', (v) => v >= 0], ['fuelMinPerKm', (v) => v >= 0], ['fuelMaxPerKm', (v) => v >= 0],
+  ['kmPerLiter', (v) => v > 0]
+];
 
 $('settingsForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  let s = readForm();
-  if (onlineRates) {
-    const own = loadSettings();
-    ['fuelEnabled'].concat(FUEL_FIELDS, WAITING_FIELDS).forEach((f) => { if (onlineRates[f] !== undefined) s[f] = own[f]; });
-  }
-  if (isNaN(s.minimumFare) || isNaN(s.perKmRate) || s.minimumFare < 0 || s.perKmRate < 0) {
-    return toast('Please enter valid prices');
+  const own = loadSettings();
+  const s = {
+    ...own,
+    ...Object.fromEntries(SHARED_FIELDS.map((f) => [f, $(f).value.trim()])),
+    mapProvider: document.querySelector('input[name="mapProvider"]:checked').value,
+    enabledVehicles: vehicleKeys().filter((key) => $(`vt_${key}`).checked),
+    vehicleNumbers: Object.fromEntries(vehicleKeys().map((key) => [key, $(`vno_${key}`).value.trim()]).filter(([, v]) => v)),
+    localOverrides: {}
+  };
+  s.currency = s.currency || 'Rs.';
+  if (!s.enabledVehicles.length) return toast('Tick at least one vehicle type');
+
+  // Each figure that differs from the API / default value is this phone's own
+  for (const key of vehicleKeys()) {
+    const ref = referenceSettings(key);
+    const form = readVehicleInputs(key);
+    const local = {};
+    RATE_FIELDS.forEach((f) => {
+      const v = form[f.id];
+      if (f.check ? v !== !!ref[f.id] : Number.isFinite(v) && v !== Number(ref[f.id])) local[f.id] = v;
+    });
+    if (Object.keys(local).length) s.localOverrides[key] = local;
+
+    if (s.enabledVehicles.includes(key)) {
+      const merged = { ...ref, ...local };
+      const bad = VALIDATION.find(([f, ok]) => !ok(form[f]));
+      const badLimits = !bad && !(merged.fuelMaxPerKm >= merged.fuelMinPerKm);
+      if (bad || badLimits) {
+        activeFareTab = key;
+        renderFareTabs();
+        const field = bad ? RATE_FIELDS.find((x) => x.id === bad[0]) : null;
+        if ((field && field.group === 'fuel') || badLimits) $(`fuelbox_${key}`).open = true;
+        return toast(badLimits ? `${vname(key)}: per km highest price must be more than the lowest`
+          : `${vname(key)}: please enter a valid "${field.label}"`);
+      }
+    }
   }
   if (s.adminPin.length < 4) return toast('PIN must be at least 4 characters');
-  if (!(s.fuelPrice > 0) || !(s.baseFuelPrice > 0) || !(s.fuelStep > 0) || !(s.kmPerLiter > 0) || isNaN(s.fuelStepChange)) {
-    return toast('Please enter valid fuel figures');
-  }
-  if (!(s.fuelMinPerKm >= 0) || !(s.fuelMaxPerKm >= s.fuelMinPerKm)) {
-    return toast('Per km highest price must be more than the lowest');
-  }
-  if (!(s.waitingPerHour >= 0)) return toast('Please enter a valid waiting charge per hour');
   if (s.mapProvider === 'google' && !s.googleApiKey) return toast('Enter a Google API key, or choose OpenStreetMap');
   if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
-  toast('✅ Settings saved');
-  updateOverrideNotice();
+  vehicleKeys().forEach(showSources);
+  updateCalcBoxes();
   CostCalc.refresh();
+  const changed = Object.values(s.localOverrides).reduce((n, o) => n + Object.keys(o).length, 0);
+  toast(changed ? `✅ Settings saved — ${changed} figure${changed > 1 ? 's' : ''} changed from the API on this phone` : '✅ Settings saved');
 });
 
 $('resetBtn').addEventListener('click', () => {
-  if (!confirm('Reset all settings to defaults (Rs.100 / Rs.65, OpenStreetMap, PIN 1234, no API key)?')) return;
+  if (!confirm('Reset everything on this phone (your changed figures, vehicle numbers, PIN 1234, map, receipt details) and use the API values?')) return;
   resetSettings();
-  fillForm(loadSettings());
-  applyOnlineRates();
-  updateOverrideNotice();
+  fillForm();
   CostCalc.refresh();
   toast('Settings reset');
 });

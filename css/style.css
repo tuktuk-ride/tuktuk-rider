@@ -291,9 +291,39 @@ select {
   background: #fff;
   color: var(--text);
 }
-.override-notice .btn { margin-top: 10px; }
-.override-notice div { margin-top: 4px; }
+/* Fare rates tabs (one per vehicle type) */
+.fare-tabs { margin: 4px 0 8px; }
+.fare-tabs .tab { padding: 10px 6px; font-size: .9rem; }
+.shared-rates { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--border); }
+.calc-price { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; }
+.calc-price.active { border: 1px solid #f3d27a; background: #fff7e0; }
+.calc-price .hint { margin-top: 4px; }
+.rounded-price { text-align: center; margin: 12px 0; font-size: 1rem; }
 
 /* Waiting time box inside the Map / Meter card, above Calculate Fare */
 .waiting-box { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .waiting-box h2 { font-size: .95rem; margin: 0; }
+
+/* Vehicle type on the fare page */
+.vehicle-label { margin-top: 0; }
+#vehicleSelect { margin-bottom: 12px; font-weight: 600; }
+
+
+/* Header title used as a link (Admin -> home) */
+header h1 a { color: inherit; font-size: inherit; font-weight: inherit; text-decoration: none; }
+
+/* Cost per km: save / defaults */
+.cost-actions .btn { margin-top: 16px; }
+.cc-figures-status { margin-top: 6px; }
+.cc-figures-status.unsaved { color: #b45309; font-weight: 600; }
+
+/* Admin fare tabs: where each figure comes from */
+.fare-panel .field { margin-bottom: 2px; }
+.src-line { font-size: .75rem; margin-top: 3px; color: var(--muted); }
+.src-line.src-local { color: #b45309; font-weight: 600; }
+.src-reset { border: none; background: none; color: #1a73e8; font-weight: 600; font-size: .75rem; padding: 2px 0; cursor: pointer; }
+.fare-panel h3.sub { font-size: .95rem; margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+.fuel-box { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+.fuel-box summary { font-weight: 700; font-size: .95rem; cursor: pointer; }
+.fuel-box .fuel-sum { font-weight: 400; color: var(--muted); font-size: .85rem; }
+.vno-label { margin-top: 14px; }

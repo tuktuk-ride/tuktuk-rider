@@ -17,7 +17,7 @@
 </head>
 <body>
   <header>
-    <h1>🛺 TukTuk Rider · Admin</h1>
+    <h1><a href="index.html" title="Back to the fare page">🛺 TukTuk Rider · Admin</a></h1>
     <a href="index.html">← Back</a>
   </header>
 
@@ -41,96 +41,28 @@
     <!-- SETTINGS -->
     <form id="settingsForm" class="hidden">
       <section class="card">
+        <h2>Vehicle types</h2>
+        <p class="hint" style="margin-top:0">Ticked types appear in the Vehicle type list on the fare page. Each type has its own fare rates.</p>
+        <div id="vehicleChecks"></div>
+      </section>
+
+      <section class="card">
         <h2>Fare rates</h2>
-        <div class="notice hidden" id="onlineRatesNotice">
-          ✓ <b>Official online rates are active.</b> Minimum fare and per km price come from the
-          online rates file and can't be changed here (the "partial km" tick too, if the file sets it). They are also saved on this device
-          and used if the online file can't be reached.
+        <p class="hint" style="margin-top:0">
+          Each vehicle type has its own fare, waiting and fuel figures. They start with the values from the online
+          rates file (API). Change any figure and press <b>Save settings</b> to use your own on this phone.
+        </p>
+        <div class="tabs fare-tabs" id="fareTabs"></div>
+
+        <!-- one panel per vehicle type (built by js/admin.js) -->
+        <div id="vehiclePanels"></div>
+
+        <div class="shared-rates">
+          <p class="hint">For all vehicle types:</p>
+          <label for="currency">Currency label</label>
+          <input type="text" id="currency" maxlength="6" required>
         </div>
-        <div class="notice override-notice hidden" id="overrideNotice">
-          <div id="overrideText"></div>
-          <button class="btn small secondary" id="overrideResetBtn" type="button">↩ Reset to API price</button>
-        </div>
-        <label for="minimumFare">Minimum fare</label>
-        <input type="number" id="minimumFare" inputmode="decimal" min="0" step="0.01" required>
-
-        <label for="perKmRate">Per km price</label>
-        <input type="number" id="perKmRate" inputmode="decimal" min="0" step="0.01" required>
-
-        <label for="currency">Currency label</label>
-        <input type="text" id="currency" maxlength="6" required>
-
-        <label class="check">
-          <input type="checkbox" id="roundUpKm">
-          Charge partial km as a full km (e.g. 3.2 km → 4 km)
-        </label>
-
-        <p class="hint" id="example"></p>
         <button class="btn secondary" type="button" data-goto="costPanel">🧮 Work out the real cost per km</button>
-      </section>
-
-      <section class="card">
-        <h2>Fuel</h2>
-        <div class="notice hidden" id="onlineFuelNotice">
-          ✓ Locked fields come from the <b>online rates file</b> and can't be changed here.
-        </div>
-        <label class="check">
-          <input type="checkbox" id="fuelEnabled">
-          Adjust per km price by fuel price
-        </label>
-        <div class="row">
-          <div>
-            <label for="fuelPrice">Current fuel price (per liter)</label>
-            <input type="number" id="fuelPrice" inputmode="decimal" min="1" step="0.01" required>
-          </div>
-          <div>
-            <label for="baseFuelPrice">Base fuel price</label>
-            <input type="number" id="baseFuelPrice" inputmode="decimal" min="1" step="0.01" required>
-          </div>
-        </div>
-        <p class="hint">Base = the fuel price your km prices were set at. Update only the current price when fuel changes.</p>
-
-        <div class="row">
-          <div>
-            <label for="fuelStep">For every fuel change of Rs.</label>
-            <input type="number" id="fuelStep" inputmode="decimal" min="1" step="1" required>
-          </div>
-          <div>
-            <label for="fuelStepChange">Per km price changes by Rs.</label>
-            <input type="number" id="fuelStepChange" inputmode="decimal" min="0" step="0.01" required>
-          </div>
-        </div>
-
-        <div class="row">
-          <div>
-            <label for="fuelMinPerKm">Per km lowest price</label>
-            <input type="number" id="fuelMinPerKm" inputmode="decimal" min="0" step="0.01" required>
-          </div>
-          <div>
-            <label for="fuelMaxPerKm">Per km highest price</label>
-            <input type="number" id="fuelMaxPerKm" inputmode="decimal" min="0" step="0.01" required>
-          </div>
-        </div>
-        <p class="hint">The fuel change keeps the per km price within these limits. If the per km price is set outside them, no fuel change is applied.</p>
-
-        <label for="kmPerLiter">Km per liter</label>
-        <input type="number" id="kmPerLiter" inputmode="decimal" min="1" step="0.1" required>
-
-        <div class="notice" id="fuelSummary"></div>
-      </section>
-
-      <section class="card">
-        <h2>Waiting charge</h2>
-        <div class="notice hidden" id="onlineWaitingNotice">
-          ✓ Waiting charge comes from the <b>online rates file</b> and can't be changed here.
-        </div>
-        <label class="check">
-          <input type="checkbox" id="waitingEnabled">
-          Charge for waiting time
-        </label>
-        <label for="waitingPerHour">Waiting charge per hour</label>
-        <input type="number" id="waitingPerHour" inputmode="decimal" min="0" step="0.01" required>
-        <p class="hint" id="waitingExample"></p>
       </section>
 
       <section class="card">
@@ -156,12 +88,10 @@
 
       <section class="card">
         <h2>Receipt details</h2>
-        <p class="hint">Shown at the top of the PDF receipt sent to passengers. Leave empty to hide.</p>
+        <p class="hint">Shown at the top of the PDF receipt sent to passengers. Leave empty to hide.
+          Each vehicle type's number plate is set in its Fare rates tab.</p>
         <label for="driverName">Driver name</label>
         <input type="text" id="driverName" placeholder="e.g. Sunil Perera">
-
-        <label for="vehicleNo">Vehicle number</label>
-        <input type="text" id="vehicleNo" placeholder="e.g. WP ABC-1234">
 
         <label for="driverPhone">Contact phone</label>
         <input type="text" id="driverPhone" inputmode="tel" placeholder="e.g. 077 123 4567">
@@ -193,6 +123,11 @@
       <section class="card">
         <h2>1. Vehicle costs</h2>
         <div id="ccCostInputs"></div>
+        <div class="row cost-actions">
+          <button class="btn cc-save-figures" type="button">💾 Save vehicle costs</button>
+          <button class="btn secondary cc-defaults" type="button">↩ Defaults</button>
+        </div>
+        <p class="hint cc-figures-status"></p>
       </section>
 
       <section class="card">
@@ -203,9 +138,29 @@
           <div class="total" id="ccChargePerKm">-</div>
           <div class="hint">Includes profit and empty return allowance</div>
         </div>
+        <div class="row">
+          <div>
+            <label for="ccRoundMode">Round the per km price</label>
+            <select id="ccRoundMode">
+              <option value="nearest">To the nearest</option>
+              <option value="down">Down (floor)</option>
+              <option value="up">Up (ceiling)</option>
+            </select>
+          </div>
+          <div>
+            <label for="ccRoundTo">Rupees</label>
+            <select id="ccRoundTo">
+              <option value="1">Rs. 1</option>
+              <option value="5">Rs. 5</option>
+              <option value="10">Rs. 10</option>
+            </select>
+          </div>
+        </div>
+        <div class="rounded-price">Per km price to use: <b id="ccRounded">-</b></div>
         <div class="notice" id="ccCompare"></div>
-        <button class="btn" id="ccApplyBtn" type="button">✅ Apply as the per km price</button>
-        <p class="hint" id="ccApplyInfo"></p>
+        <button class="btn" id="ccSaveBtn" type="button">💾 Save as the cost per km price</button>
+        <p class="hint" id="ccSaveInfo"></p>
+        <button class="btn small secondary hidden" id="ccOpenFareBtn" type="button">Open the fare rates tab</button>
       </section>
 
       <section class="card">
@@ -213,9 +168,12 @@
         <div id="ccTripInputs"></div>
         <table class="breakdown calc-table" id="ccTripTable"></table>
         <p class="hint">Total is rounded down to the nearest Rs. 10, the same as the app.</p>
+        <div class="row cost-actions">
+          <button class="btn cc-save-figures" type="button">💾 Save vehicle costs</button>
+          <button class="btn secondary cc-defaults" type="button">↩ Defaults</button>
+        </div>
+        <p class="hint cc-figures-status"></p>
       </section>
-
-      <button class="btn danger" id="ccResetBtn" type="button">Reset figures to defaults</button>
     </div>
   </main>
 
