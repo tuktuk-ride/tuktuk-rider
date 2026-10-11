@@ -15,12 +15,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body class="fare-page">
   <header>
     <h1>🛺 TukTuk Rider</h1>
     <div class="header-actions">
       <button class="install-btn hidden" id="installBtn" type="button">📲 Install</button>
-      <a href="admin.html">Admin ⚙</a>
+      <a href="#" id="modeSwitch" class="mode-switch"></a>
+      <a href="admin.html" class="rider-only" title="Admin settings"><span class="hide-small">Admin </span>⚙</a>
     </div>
   </header>
 
@@ -33,14 +34,29 @@
         <b>Add to Home Screen</b>.</p>
     </div>
 
-    <div class="card">
+    <!-- FIRST VISIT: rider or passenger? -->
+    <section class="card mode-chooser chooser-only">
+      <h2>Welcome to TukTuk Rider</h2>
+      <p class="hint">How will you use the app?</p>
+      <button class="btn mode-btn" type="button" data-choose="rider">🛺 I'm a Rider<small>Work out the fare, waiting time and receipts</small></button>
+      <button class="btn secondary mode-btn" type="button" data-choose="passenger">🙋 I'm a Passenger<small>See roughly how much a ride will cost</small></button>
+      <p class="hint">You can switch any time at the top of the page.</p>
+    </section>
+
+    <!-- PASSENGER: what this page does -->
+    <section class="card passenger-only">
+      <h2>🙋 Fare estimate</h2>
+      <p class="hint" style="margin:0">Choose where you start and where you are going. You'll see the estimated fare for each vehicle type.</p>
+    </section>
+
+    <div class="card rider-only">
       <label for="vehicleSelect" class="vehicle-label">Vehicle type</label>
       <select id="vehicleSelect"><option>Loading…</option></select>
       <p class="rate-info" id="rateInfo"></p>
       <p class="hint" id="rateSource"></p>
     </div>
 
-    <div class="tabs">
+    <div class="tabs rider-only">
       <button class="tab active" data-panel="mapPanel">📍 Map</button>
       <button class="tab" data-panel="meterPanel">🔢 Meter</button>
     </div>
@@ -70,6 +86,11 @@
 
         <p class="hint">Tip: you can also tap the map — 1st tap = start, 2nd tap = end. Drag pins to adjust.</p>
         <div id="map"></div>
+
+        <div class="expressway-box" id="expresswayBox">
+          <label class="check"><input type="checkbox" id="useExpressway"> 🛣 Use the expressway</label>
+          <p class="hint" id="expresswayHint"></p>
+        </div>
 
         <div class="waiting-slot"></div>
         <div class="row">
@@ -104,7 +125,7 @@
 
     <!-- WAITING TIME: one box, moved by js/app.js into the open tab, just above Calculate Fare -->
     <div class="waiting-box hidden" id="waitingCard">
-      <h2>⏱ Waiting time</h2>
+      <h2 id="waitingTitle">⏱ Waiting time</h2>
       <div class="row">
         <div>
           <label for="waitHours">Hours</label>
@@ -118,8 +139,21 @@
       <p class="hint" id="waitingInfo"></p>
     </div>
 
+    <!-- PASSENGER: estimate for every vehicle type -->
+    <section class="card estimate passenger-only hidden" id="estimateCard">
+      <h2>Estimated fare</h2>
+      <div class="hint" id="estimateTrip"></div>
+      <div class="est-places">
+        <div id="estimateFrom"></div>
+        <div id="estimateTo"></div>
+      </div>
+      <div id="estimateList"></div>
+      <p class="hint" id="estimateNote"></p>
+      <button class="btn" id="shareEstimateBtn" type="button">📤 Share estimate</button>
+    </section>
+
     <!-- RESULT -->
-    <section class="card result hidden" id="resultCard">
+    <section class="card result rider-only hidden" id="resultCard">
       <div class="distance" id="resultDistance"></div>
       <div class="total" id="resultTotal"></div>
       <div class="distance" id="resultDuration"></div>
@@ -143,6 +177,7 @@
   <script src="js/maps.js"></script>
   <script src="js/receipt.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/passenger.js"></script>
   <script src="js/install.js"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@
       "name": "Tuktuk",
       "icon": "🛺",
       "apiKey": "THREE_WHEELER",
+      "avoidExpressways": true,
       "fare": {
         "minimumFare": 150,
         "perKm": 65,
@@ -37,6 +38,7 @@
       "name": "Bike",
       "icon": "🏍️",
       "apiKey": "BIKE",
+      "avoidExpressways": true,
       "fare": {
         "minimumFare": 100,
         "perKm": 50,
@@ -69,6 +71,7 @@
       "name": "Car",
       "icon": "🚗",
       "apiKey": "CAR",
+      "avoidExpressways": false,
       "fare": {
         "minimumFare": 500,
         "perKm": 110,

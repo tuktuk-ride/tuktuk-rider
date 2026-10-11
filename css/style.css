@@ -327,3 +327,40 @@ header h1 a { color: inherit; font-size: inherit; font-weight: inherit; text-dec
 .fuel-box summary { font-weight: 700; font-size: .95rem; cursor: pointer; }
 .fuel-box .fuel-sum { font-weight: 400; color: var(--muted); font-size: .85rem; }
 .vno-label { margin-top: 14px; }
+
+/* Rider / Passenger mode (body[data-mode] is set by js/passenger.js) */
+body[data-mode="rider"] .passenger-only,
+body[data-mode="rider"] .chooser-only,
+body[data-mode="passenger"] .rider-only,
+body[data-mode="passenger"] .chooser-only,
+body[data-mode="choose"] main > :not(.chooser-only):not(#iosInstallHint),
+body[data-mode="choose"] .mode-switch,
+body[data-mode="choose"] header .rider-only { display: none !important; }
+body.fare-page:not([data-mode]) main { visibility: hidden; } /* home page, until the mode is known */
+
+.mode-switch {
+  border: 2px solid #1d1f23;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: .8rem !important;
+}
+.mode-btn { display: block; text-align: left; padding: 16px; font-size: 1.05rem; }
+.mode-btn small { display: block; font-weight: 400; font-size: .85rem; margin-top: 4px; opacity: .8; }
+
+/* Passenger estimate */
+.est-places { font-size: .85rem; margin: 8px 0 4px; color: var(--muted); }
+.est-places div { margin-top: 2px; }
+.est-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.est-row:first-child { border-top: none; }
+.est-name small { display: block; color: var(--muted); font-size: .78rem; margin-top: 2px; }
+.est-price { font-weight: 800; font-size: 1.15rem; color: var(--accent); white-space: nowrap; text-align: right; }
+#estimateList { margin-top: 8px; border-top: 1px solid var(--border); }
+
+/* Small phones: header buttons as icons only (full words stay in the tooltip) */
+@media (max-width: 400px) {
+  .hide-small { display: none; }
+}
+
+/* "Use the expressway" tick */
+.expressway-box { margin-top: 14px; }
+.expressway-box .hint { margin: 2px 0 0; }

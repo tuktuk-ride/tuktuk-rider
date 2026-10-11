@@ -109,6 +109,7 @@ function createReceiptPdf(trip, s = loadSettings()) {
 
     // Total
     row('TOTAL', money(f.total), true, 13);
+    if (trip.plusToll) row('+ Expressway toll', 'paid on top');
     y += 1;
     divider();
 

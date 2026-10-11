@@ -27,6 +27,37 @@ function showRateInfo(source) {
 }
 
 // ---------- Vehicle type ----------
+// Route rules per vehicle type: 3-wheelers and motorbikes may never use expressways (config.json);
+// the others use them only when "Use the expressway" is ticked. The toll is not added to the fare:
+// a fare on an expressway route reads "Rs. 1,100 + expressway toll".
+const expresswayAllowed = (key) => !(appConfig.vehicles[key] || {}).avoidExpressways;
+const routeOptions = (key) => ({ avoidExpressways: !(expresswayAllowed(key) && $('useExpressway').checked) });
+const usesExpressway = (r, key) => !!(r && r.expressway && expresswayAllowed(key) && $('useExpressway').checked);
+const TOLL_WORDS = ' + expressway toll';
+
+// The tick only matters for vehicle types allowed on expressways
+function updateExpresswayBox() {
+  const passenger = typeof isPassenger === 'function' && isPassenger();
+  const anyAllowed = Object.keys(appConfig.vehicles).some(expresswayAllowed);
+  $('expresswayBox').classList.toggle('hidden', passenger ? !anyAllowed : !expresswayAllowed(currentVehicle));
+  $('expresswayHint').textContent = passenger
+    ? 'For cars. Tuk-tuks and bikes never use expressways. The toll is paid on top of the fare.'
+    : 'The toll is not included: the fare will read "+ expressway toll".';
+}
+
+$('useExpressway').addEventListener('change', () => {
+  // re-route a trip that is on screen
+  const shown = !$('resultCard').classList.contains('hidden') || !$('estimateCard').classList.contains('hidden');
+  if (shown && points.start && points.end) $('calcMapBtn').click();
+});
+
+function routeNote(r, opts) {
+  if (r.fallback && opts.avoidExpressways) return 'route may use an expressway (the expressway-free route service could not be reached)';
+  if (opts.avoidExpressways) return 'shortest route without expressways';
+  if (r.expressway) return r.expresswayKm ? `shortest route, ${r.expresswayKm} km on the expressway` : 'shortest route, via the expressway';
+  return 'shortest route (no expressway needed)';
+}
+
 // Types ticked in Admin, in config.json order (at least the main type)
 function enabledVehicles() {
   const ticked = Object.keys(appConfig.vehicles).filter((k) => (adminSettings.enabledVehicles || []).includes(k));
@@ -38,10 +69,15 @@ function applyVehicle(key, remember = true) {
   settings = vehicleSettings(adminSettings, key, appConfig, rateSet);
   const changed = Object.keys((adminSettings.localOverrides || {})[key] || {}).length;
   const online = vehicleOnline(key, appConfig, rateSet);
+  updateExpresswayBox();
   showRateInfo(online
     ? (changed ? '✓ Official online rates, with figures changed on this phone' : '✓ Official online rates')
     : (changed ? "Using this phone's rates" : 'Using the default rates'));
-  if (lastTrip && !$('resultCard').classList.contains('hidden')) renderResult(); // same trip, this vehicle's rates
+  if (lastTrip && !$('resultCard').classList.contains('hidden')) {
+    // a map trip needs this vehicle's own route (e.g. no expressway for tuk-tuks); a meter trip keeps its km
+    if (lastTrip.mode === 'map' && points.start && points.end) $('calcMapBtn').click();
+    else renderResult();
+  }
   if (remember) saveSettings({ ...loadSettings(), selectedVehicle: key });
 }
 
@@ -103,11 +139,12 @@ function showResult(distanceKm, durationText, trip) {
 function renderResult() {
   lastTrip.waitingMins = getWaitingMins();
   lastTrip.vehicleName = (appConfig.vehicles[currentVehicle] || {}).name || currentVehicle;
+  lastTrip.plusToll = lastTrip.mode === 'map' && usesExpressway(lastTrip.route, currentVehicle);
   const f = calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins);
   $('resultDistance').textContent = `${vehicleLabel(appConfig, currentVehicle)}  •  Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
     (settings.roundUpKm ? ` (charged as ${f.km} km)` : '') +
     (f.waitMins ? `  •  Waiting: ${formatWaiting(f.waitMins)}` : '');
-  $('resultTotal').textContent = formatMoney(f.total, settings);
+  $('resultTotal').textContent = formatMoney(f.total, settings) + (lastTrip.plusToll ? TOLL_WORDS : '');
   $('resultDuration').textContent = lastTrip.durationText || '';
 
   $('resultBreakdown').innerHTML = `
@@ -119,11 +156,14 @@ function renderResult() {
     <tr><td>Waiting ${formatWaiting(f.waitMins)} × ${formatMoney(f.waitRate, settings)}/hour</td>
         <td>${formatMoney(f.waitingPart.toFixed(2), settings)}</td></tr>` : '') + `
     <tr><td>Exact amount</td><td>${formatMoney(f.exact.toFixed(2), settings)}</td></tr>
-    <tr><td><b>Total (rounded down to 10)</b></td><td><b>${formatMoney(f.total, settings)}</b></td></tr>`;
+    <tr><td><b>Total (rounded down to 10)</b></td><td><b>${formatMoney(f.total, settings)}</b></td></tr>` +
+    (lastTrip.plusToll ? `
+    <tr><td>Expressway toll (${lastTrip.route.expresswayKm} km on the expressway)</td><td>paid on top</td></tr>` : '');
 }
 
 function hideResult() {
   $('resultCard').classList.add('hidden');
+  $('estimateCard').classList.add('hidden'); // passenger estimate (js/passenger.js)
 }
 
 // ---------- Meter mode ----------
@@ -309,13 +349,15 @@ $('calcMapBtn').addEventListener('click', async () => {
   $('calcMapBtn').disabled = true;
   try {
     await ratesReady;
-    const r = await provider.route(points.start, points.end);
+    if (isPassenger()) return await passengerEstimate(); // every vehicle type, each on its own route
+    const opts = routeOptions(currentVehicle);
+    const r = await provider.route(points.start, points.end, opts);
     if (r.km < 0.01) throw new Error('start and end are the same place.');
     provider.drawRoute(r.path);
     provider.fit([points.start, points.end]);
     mapError();
-    showResult(r.km, `Approx. travel time: ${r.mins} min`, {
-      mode: 'map', from: pointLabels.start, to: pointLabels.end, mins: r.mins
+    showResult(r.km, `Approx. travel time: ${r.mins} min  •  ${routeNote(r, opts)}`, {
+      mode: 'map', from: pointLabels.start, to: pointLabels.end, mins: r.mins, route: r
     });
   } catch (err) {
     mapError('Could not calculate route: ' + err.message);
@@ -358,7 +400,8 @@ $('shareReceiptBtn').addEventListener('click', async () => {
   const r = buildReceipt();
   if (!r) return;
   const file = new File([r.doc.output('blob')], r.fileName, { type: 'application/pdf' });
-  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins).total, settings);
+  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins).total, settings) +
+    (lastTrip.plusToll ? TOLL_WORDS : '');
 
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {

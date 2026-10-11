@@ -3,7 +3,8 @@
 //   search(query)                   -> Promise<[{ label, lat, lng }]>
 //   setMarker(which, pos, onDrag)   which = 'start' | 'end', pos = { lat, lng }
 //   removeMarker(which)
-//   route(a, b)                     -> Promise<{ km, mins, path: [{ lat, lng }] }>
+//   route(a, b, { avoidExpressways }) -> Promise<{ km, mins, path: [{ lat, lng }], expressway, fallback }>
+//                                    shortest legal route; avoidExpressways for 3-wheelers / motorbikes
 //   reverse(pos) (optional)         -> Promise<address string | null>
 //   drawRoute(path) / clearRoute()
 //   fit(points) / focus(pos, zoom)
@@ -26,6 +27,72 @@ function loadCss(href) {
   l.rel = 'stylesheet';
   l.href = href;
   document.head.appendChild(l);
+}
+
+// ---------- Free routing ----------
+// Valhalla (OpenStreetMap community server): shortest route, and it can leave out expressways,
+// which three-wheelers and motorbikes may not use in Sri Lanka. OSRM is the fallback if it can't be reached.
+const VALHALLA_URL = 'https://valhalla1.openstreetmap.de/route';
+const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving/';
+
+// Valhalla route lines are encoded polylines with 6 decimal places
+function decodePolyline6(str) {
+  const path = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < str.length) {
+    for (const axis of ['lat', 'lng']) {
+      let shift = 0, result = 0, byte;
+      do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+      const delta = result & 1 ? ~(result >> 1) : result >> 1;
+      if (axis === 'lat') lat += delta; else lng += delta;
+    }
+    path.push({ lat: lat / 1e6, lng: lng / 1e6 });
+  }
+  return path;
+}
+
+async function valhallaRoute(a, b, { avoidExpressways = false } = {}) {
+  const request = {
+    locations: [{ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }],
+    costing: 'auto',
+    costing_options: { auto: { shortest: true, exclude_highways: !!avoidExpressways } },
+    units: 'kilometers',
+    directions_type: 'maneuvers' // tells which parts are on the expressway
+  };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(`${VALHALLA_URL}?json=${encodeURIComponent(JSON.stringify(request))}`, { signal: ctrl.signal });
+    const data = await res.json().catch(() => null);
+    if (data && data.trip) {
+      const t = data.trip;
+      const expresswayKm = (t.legs[0].maneuvers || []).filter((m) => m.highway).reduce((sum, m) => sum + (m.length || 0), 0);
+      return {
+        km: t.summary.length, mins: Math.round(t.summary.time / 60), path: decodePolyline6(t.legs[0].shape),
+        expressway: !!t.summary.has_highway, expresswayKm: Math.round(expresswayKm * 10) / 10
+      };
+    }
+    const err = new Error(data && data.error_code ? 'no road route found between these points.' : 'route service unavailable');
+    err.noRoute = !!(data && data.error_code); // the service answered: there is no such route
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function osrmRoute(a, b) {
+  const res = await fetch(`${OSRM_URL}${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
+  if (!res.ok) throw new Error('the free route service is busy. Please try again in a moment.');
+  const data = await res.json();
+  if (data.code !== 'Ok' || !data.routes.length) throw new Error(data.message || 'No road route found between these points.');
+  const r = data.routes[0];
+  return {
+    km: r.distance / 1000,
+    mins: Math.round(r.duration / 60),
+    path: r.geometry.coordinates.map(([lng, lat]) => ({ lat, lng })),
+    expressway: null, // unknown
+    fallback: true
+  };
 }
 
 // ======================= OpenStreetMap (free, no key) =======================
@@ -64,12 +131,17 @@ function createOsmProvider() {
     },
 
     async search(query) {
-      const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5' +
+      const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8' +
                   '&countrycodes=lk&q=' + encodeURIComponent(query);
       const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
       if (!res.ok) throw new Error('Search failed');
       const data = await res.json();
-      return data.map((p) => ({ label: p.display_name, lat: +p.lat, lng: +p.lon }));
+      // A district or province (e.g. "Galle District") is a whole area: the map can only show its middle,
+      // which gives a wrong distance. Leave such areas out when a real town / place matches.
+      const places = data.map((p) => ({ label: p.display_name, lat: +p.lat, lng: +p.lon, area: Number(p.place_rank) < 16 }));
+      const real = places.filter((p) => !p.area);
+      return (real.length ? real : places.map((p) => ({ ...p, label: p.label + ' (whole area — pick a town or place for an accurate fare)' })))
+        .slice(0, 5);
     },
 
     setMarker(which, pos, onDrag) {
@@ -89,21 +161,13 @@ function createOsmProvider() {
       markers[which] = null;
     },
 
-    async route(a, b) {
-      const url = `https://router.project-osrm.org/route/v1/driving/` +
-                  `${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('the free route service is busy. Please try again in a moment.');
-      const data = await res.json();
-      if (data.code !== 'Ok' || !data.routes.length) {
-        throw new Error(data.message || 'No road route found between these points.');
+    async route(a, b, opts = {}) {
+      try {
+        return await valhallaRoute(a, b, opts);
+      } catch (e) {
+        if (e.noRoute) throw e;
+        return osrmRoute(a, b); // Valhalla unreachable: fastest car route (may use an expressway)
       }
-      const r = data.routes[0];
-      return {
-        km: r.distance / 1000,
-        mins: Math.round(r.duration / 60),
-        path: r.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }))
-      };
     },
 
     drawRoute(path) {
@@ -122,6 +186,10 @@ function createOsmProvider() {
 
     focus(pos, zoom = 15) {
       map.setView([pos.lat, pos.lng], zoom);
+    },
+
+    resize() {
+      map.invalidateSize();
     }
   };
 }
@@ -195,7 +263,7 @@ function createGoogleProvider(apiKey) {
       markers[which] = null;
     },
 
-    async route(a, b) {
+    async route(a, b, opts = {}) {
       const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
         method: 'POST',
         headers: {
@@ -207,14 +275,17 @@ function createGoogleProvider(apiKey) {
           origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } },
           destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } },
           travelMode: 'DRIVE',
-          routingPreference: 'TRAFFIC_UNAWARE'
+          routingPreference: 'TRAFFIC_UNAWARE',
+          computeAlternativeRoutes: true,
+          routeModifiers: { avoidHighways: !!opts.avoidExpressways }
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Route request failed');
       if (!data.routes || !data.routes.length) throw new Error('No road route found between these points.');
-      const r = data.routes[0];
+      const r = data.routes.reduce((best, x) => (x.distanceMeters < best.distanceMeters ? x : best)); // shortest
       return {
+        expressway: opts.avoidExpressways ? false : null,
         km: r.distanceMeters / 1000,
         mins: Math.round(parseInt(r.duration, 10) / 60),
         path: google.maps.geometry.encoding.decodePath(r.polyline.encodedPolyline)
