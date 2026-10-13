@@ -1,22 +1,15 @@
 // Shared settings + fare logic. Settings live in the browser's localStorage (no database).
 const SETTINGS_KEY = 'tuktuk_settings_v1';
 
-const DEFAULT_SETTINGS = {
+// Fare figures of one vehicle type. Built-in last resort only: config.json gives each type its own
+// defaults, the online rates file overrides them and Admin can change them on this phone.
+const RATE_DEFAULTS = {
   minimumFare: 150,     // lowest fare for a trip's distance (Rs.)
   perKmRate: 65,        // price per km (Rs.)
-  enabledVehicles: ['tuktuk'], // vehicle types offered on the fare page (ticked in Admin)
-  selectedVehicle: 'tuktuk',   // vehicle type last chosen on the fare page
-  vehicleRates: {},            // Admin fare rates for the other vehicle types,
-                               // e.g. { car: { minimumFare: 500, perKmRate: 110, waitingPerHour: 400 } }
-  perKmCalculated: {},         // per km price saved from the Admin "Cost per km" tab, per type, e.g. { car: 66 }
-  useCalculated: {},           // true = charge that saved price instead of the API/Admin per km price
-                               // (no fuel adjustment on top, fuel is part of the calculation), e.g. { car: true }
   roundUpKm: false,     // true = charge partial km as a full km
-  currency: 'Rs.',
-  mapProvider: 'osm',   // 'osm' = OpenStreetMap (free) | 'google' = Google Maps (needs API key)
-  googleApiKey: '',     // Google Maps API key (Maps JavaScript API + Places API (New) + Routes API)
-  adminPin: '1234',
-  fuelEnabled: true,    // adjust the per km price by fuel price (API IS_FUEL_PRICE overrides this)
+  fareRoundMode: 'down', // total rounded 'down' | 'up' | 'nearest'...
+  fareRoundTo: 10,      // ...to this many Rs.
+  fuelEnabled: true,    // adjust the per km price by fuel price
   // Fuel. Per km price moves by fuelStepChange for every fuelStep the fuel price
   // is above/below the band of baseFuelPrice. Bands are multiples of fuelStep (400-424, 425-449...).
   fuelPrice: 414,       // current fuel price per liter
@@ -26,8 +19,22 @@ const DEFAULT_SETTINGS = {
   fuelMinPerKm: 50,     // fuel change never takes the per km price below this...
   fuelMaxPerKm: 100,    // ...or above this
   kmPerLiter: 28,       // info only: fuel cost per km
-  waitingEnabled: true, // charge for waiting time (API IS_WAITING true overrides this)
+  waitingEnabled: true, // charge for waiting time
   waitingPerHour: 300,  // waiting charge per hour
+  waitingGraceMins: 0,  // first minutes of waiting are free...
+  waitingStepMins: 1    // ...the rest is charged in blocks of this many minutes
+};
+
+const DEFAULT_SETTINGS = {
+  enabledVehicles: ['tuktuk'], // vehicle types offered on the fare page (ticked in Admin)
+  selectedVehicle: 'tuktuk',   // vehicle type last chosen on the fare page
+  perKmCalculated: {},         // per km price saved from the Admin "Cost per km" tab, per type, e.g. { car: 66 }
+  useCalculated: {},           // true = charge that saved price instead of the API/Admin per km price
+                               // (no fuel adjustment on top, fuel is part of the calculation), e.g. { car: true }
+  currency: 'Rs.',
+  mapProvider: 'osm',   // 'osm' = OpenStreetMap (free) | 'google' = Google Maps (needs API key)
+  googleApiKey: '',     // Google Maps API key (Maps JavaScript API + Places API (New) + Routes API)
+  adminPin: '1234',
   driverName: '',       // shown on PDF receipts
   localOverrides: {},   // figures changed in Admin on this phone, per vehicle type; they win over the API,
                         // e.g. { car: { perKmRate: 120, waitingPerHour: 350 } }. Unchanged figures follow the API.
@@ -78,29 +85,69 @@ function resetSettings() {
   try { localStorage.removeItem(SETTINGS_KEY); } catch (e) { /* storage blocked */ }
 }
 
-// ---------- Online rates ----------
-// Central rates file, e.g.
-// { "MINIMUM_FARE": 100, "PER_KM": 65, "ROUND_UP_KM": false, "IS_STOPPED": false,
-//   "IS_FUEL_PRICE": true, "FUEL_PRICE": 414, "BASE_FUEL_PRICE": 414, "PER_LITER": 28,
-//   "CHANGE_PRICE_PER": 25, "CHANGE_AMOUNT": 5, "MIN_CHANGE": 50, "MAX_CHANGE": 100 }
-// IS_STOPPED false -> these values are used everywhere (matching admin fields are locked).
-// IS_STOPPED true, or file unreachable -> each device's admin settings are used for everything.
-// ROUND_UP_KM optional: overrides the admin "partial km as full km" tick; missing = admin tick.
-// Fuel rule (BASE_FUEL_PRICE, CHANGE_PRICE_PER, CHANGE_AMOUNT, MIN_CHANGE, MAX_CHANGE): taken from the
-//   API when present, otherwise admin values.
-// IS_FUEL_PRICE true  = FUEL_PRICE / PER_LITER from the API (fuel adjustment on).
-// IS_FUEL_PRICE false = fuel price, km per liter and the on/off tick from admin settings.
-// IS_WAITING true  = waiting charge on, WAITING_PER_HOUR from the API (admin rate if missing/invalid).
-// IS_WAITING false or missing = waiting on/off tick and rate from admin settings.
-// Each vehicle type has a block with these fields, named by its config.json "apiKey":
-//   "THREE_WHEELER": { ... }, "BIKE": { ... }, "CAR": { ... }
-// Each block has its own IS_STOPPED: true -> that type uses its Admin rates.
-// Older files with the fields at the top level (no "THREE_WHEELER" block) still work for the main type.
+// ---------- Rate files (config.json defaults + online rates file) ----------
+// Both files use the same shape per vehicle type (keys as in config.json: "tuktuk", "bike", "car"):
+//   "fare":    { "minimumFare": 150, "perKm": 65, "roundUpKm": false, "roundMode": "down", "roundTo": 10 }
+//   "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 }
+//   "fuel":    { "enabled": true, "price": 414, "kmPerLitre": 25, "basePrice": 414,
+//                "stepEvery": 25, "stepAmount": 5, "minPerKm": 50, "maxPerKm": 100 }
+// Online rates file: { "schemaVersion": 2, "updatedAt": "2026-10-12", "vehicles": { "tuktuk": { "active": true, ... } } }
+//   "active": true is required, plus fare.minimumFare and fare.perKm; otherwise that type uses this phone's rates.
+//   Any other field left out (or null) = this phone decides (config.json default, or changed in Admin).
+//   Values outside config.json "limits" are ignored, so a typo (650 instead of 65) is never charged.
+// The last good copy of the online file is kept on the phone and used for "ratesCacheDays" days
+// when the file can't be reached (no internet) or has an error.
+// Older files ({ "THREE_WHEELER": { "MINIMUM_FARE": 150, "IS_STOPPED": false, ... }, "BIKE": ... }) still work.
 // Must be https: the app is served over https on GitHub Pages and browsers block http requests from it.
-const RATES_URL = 'https://tuktukfee.theguru.asia/tuktuk.json';
+const RATES_URL = 'https://tuktukfee.theguru.asia/tuktuk.json'; // when config.json has no https "ratesUrl"
+const RATES_CACHE_KEY = 'tuktuk_rates_cache_v1';
 
-// Settings overrides from one set of fields (top level, or a vehicle block), or null when that set is
-// stopped (IS_STOPPED not false) or has no valid prices -> Admin settings are used instead.
+const numberOk = (ok) => (v) => typeof v === 'number' && Number.isFinite(v) && ok(v);
+const isBool = (v) => typeof v === 'boolean';
+// [group, field in the files, setting name, valid?]
+const RATE_MAP = [
+  ['fare', 'minimumFare', 'minimumFare', numberOk((n) => n >= 0)],
+  ['fare', 'perKm', 'perKmRate', numberOk((n) => n >= 0)],
+  ['fare', 'roundUpKm', 'roundUpKm', isBool],
+  ['fare', 'roundMode', 'fareRoundMode', (v) => ['down', 'up', 'nearest'].includes(v)],
+  ['fare', 'roundTo', 'fareRoundTo', numberOk((n) => n > 0)],
+  ['waiting', 'enabled', 'waitingEnabled', isBool],
+  ['waiting', 'perHour', 'waitingPerHour', numberOk((n) => n >= 0)],
+  ['waiting', 'graceMins', 'waitingGraceMins', numberOk((n) => n >= 0)],
+  ['waiting', 'stepMins', 'waitingStepMins', numberOk((n) => n >= 1)],
+  ['fuel', 'enabled', 'fuelEnabled', isBool],
+  ['fuel', 'price', 'fuelPrice', numberOk((n) => n > 0)],
+  ['fuel', 'kmPerLitre', 'kmPerLiter', numberOk((n) => n > 0)],
+  ['fuel', 'basePrice', 'baseFuelPrice', numberOk((n) => n > 0)],
+  ['fuel', 'stepEvery', 'fuelStep', numberOk((n) => n > 0)],
+  ['fuel', 'stepAmount', 'fuelStepChange', numberOk((n) => n >= 0)],
+  ['fuel', 'minPerKm', 'fuelMinPerKm', numberOk((n) => n >= 0)],
+  ['fuel', 'maxPerKm', 'fuelMaxPerKm', numberOk((n) => n >= 0)]
+];
+
+// Settings from one vehicle block of config.json / the online file. Invalid or out-of-limits values are left out.
+function readRateBlock(block, limits = {}) {
+  const rates = {};
+  RATE_MAP.forEach(([group, field, setting, valid]) => {
+    let v = (block[group] || {})[field];
+    if (typeof v === 'string' && v.trim() !== '' && !isNaN(v)) v = Number(v); // "65" -> 65
+    const range = (limits[group] || {})[field];
+    if (!valid(v) || (range && (v < range[0] || v > range[1]))) return;
+    rates[setting] = v;
+  });
+  if (rates.fuelMaxPerKm < rates.fuelMinPerKm) { delete rates.fuelMinPerKm; delete rates.fuelMaxPerKm; }
+  return rates;
+}
+
+// Settings overrides from a vehicle block of the online file, or null (not active / no valid prices -> phone's rates)
+function parseOnlineBlock(block, limits) {
+  if (block.active !== true) return null;
+  const rates = readRateBlock(block, limits);
+  return 'minimumFare' in rates && 'perKmRate' in rates ? rates : null;
+}
+
+// Older online file: settings overrides from one set of UPPER_CASE fields (top level, or a vehicle block),
+// or null when that set is stopped (IS_STOPPED not false) or has no valid prices.
 function parseRateBlock(data) {
   const minFare = Number(data.MINIMUM_FARE);
   const perKm = Number(data.PER_KM);
@@ -135,58 +182,103 @@ function parseRateBlock(data) {
   return rates;
 }
 
-// Reads the online rates file: { main: overrides | null, vehicles: { bike: overrides | null, car: ... }, reachable }
+// Block name of a vehicle type in an older online file, e.g. "THREE_WHEELER"
+const LEGACY_BLOCKS = { tuktuk: 'THREE_WHEELER' };
+const legacyBlockName = (key) => LEGACY_BLOCKS[key] || key.toUpperCase();
+const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+// { format, main, vehicles: { tuktuk: overrides | null, ... }, updatedAt }, or null for a file that isn't a rates file
+function parseRateFile(data, cfg) {
+  if (!isObject(data)) return null;
+  const vehicles = {};
+  if (isObject(data.vehicles)) {
+    Object.entries(data.vehicles).forEach(([key, block]) => {
+      if (isObject(block)) vehicles[key.toLowerCase()] = parseOnlineBlock(block, cfg.limits || {});
+    });
+    return { format: 2, main: null, vehicles, updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '' };
+  }
+  const byName = Object.fromEntries(Object.entries(data).filter(([, b]) => isObject(b)).map(([n, b]) => [n.toUpperCase(), b]));
+  Object.keys(cfg.vehicles).forEach((key) => {
+    const block = byName[legacyBlockName(key)];
+    if (block) vehicles[key] = parseRateBlock(block);
+  });
+  return { format: 1, main: parseRateBlock(data), vehicles, updatedAt: '' };
+}
+
+// Last good online file kept on this phone, if not older than config.json "ratesCacheDays"
+function cachedRateSet(cfg) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RATES_CACHE_KEY) || 'null');
+    const maxDays = Number(cfg.ratesCacheDays ?? 14);
+    if (!saved || !(Date.now() - saved.savedAt <= maxDays * 864e5)) return null;
+    const set = parseRateFile(saved.data, cfg);
+    return set && { ...set, reachable: false, cachedAt: saved.savedAt };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Reads the online rates file: { format, main, vehicles, updatedAt, reachable, cachedAt? }.
+// Not reachable / not valid JSON -> the saved copy, else no online rates (this phone's rates are used).
 async function fetchOnlineRateSet() {
+  const cfg = await loadAppConfig();
+  const url = /^https:\/\//.test(cfg.ratesUrl || '') ? cfg.ratesUrl : RATES_URL;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
-    const res = await fetch(RATES_URL, { cache: 'no-store', signal: ctrl.signal });
-    if (!res.ok) return { main: null, vehicles: {}, reachable: false };
+    const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const vehicles = {};
-    Object.entries(data).forEach(([key, block]) => {
-      if (block && typeof block === 'object' && !Array.isArray(block)) vehicles[key.toLowerCase()] = parseRateBlock(block);
-    });
-    return { main: parseRateBlock(data), vehicles, reachable: true };
+    const set = parseRateFile(data, cfg);
+    if (!set) throw new Error('not a rates file');
+    try { localStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data })); } catch (e) { /* storage blocked */ }
+    return { ...set, reachable: true };
   } catch (e) {
-    return { main: null, vehicles: {}, reachable: false };     // offline / blocked / timeout / not valid JSON
+    return cachedRateSet(cfg) || { format: 0, main: null, vehicles: {}, updatedAt: '', reachable: false };
   } finally {
     clearTimeout(timer);
   }
 }
 
-// Block name in the online rates file for a vehicle type, e.g. "THREE_WHEELER"
-function onlineBlockName(key, cfg) {
-  return String(((cfg.vehicles[key] || {}).apiKey) || key).toUpperCase();
+// Name of a vehicle type's block in the online file, for messages, e.g. "tuktuk" or "THREE_WHEELER"
+function onlineBlockName(key, cfg, rateSet) {
+  return rateSet && rateSet.format === 1 ? legacyBlockName(key) : key;
 }
 
 // 'active' | 'stopped' | 'none' for a vehicle type's block in the online rates file
 function onlineBlockState(key, cfg, rateSet) {
   const blocks = rateSet.vehicles || {};
-  const name = onlineBlockName(key, cfg).toLowerCase();
-  if (name in blocks) return blocks[name] ? 'active' : 'stopped';
+  if (key in blocks) return blocks[key] ? 'active' : 'stopped';
   if (key === cfg.defaultVehicle && rateSet.main) return 'active'; // older file: top-level fields
   return 'none';
 }
 
-// Online settings overrides for a vehicle type, or null (= use Admin settings)
+// Online settings overrides for a vehicle type, or null (= use this phone's rates)
 function onlineBlock(key, cfg, rateSet) {
   const blocks = rateSet.vehicles || {};
-  const name = onlineBlockName(key, cfg).toLowerCase();
-  if (name in blocks) return blocks[name];
-  return key === cfg.defaultVehicle ? rateSet.main : null;
+  if (key in blocks) return blocks[key];
+  return key === cfg.defaultVehicle ? rateSet.main || null : null;
+}
+
+// e.g. "✓ Official online rates (updated 2026-10-12)" / "✓ Official rates (offline copy from 12 Oct)"
+function onlineSourceText(rateSet) {
+  if (rateSet.cachedAt) {
+    const day = new Date(rateSet.cachedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    return `✓ Official rates (offline copy from ${day})`;
+  }
+  return '✓ Official online rates' + (rateSet.updatedAt ? ` (updated ${rateSet.updatedAt})` : '');
 }
 
 // ---------- Vehicle types (config.json) ----------
 // Loaded once per page. Without config.json the app still works, with the tuktuk only.
-const FALLBACK_CONFIG = { defaultVehicle: 'tuktuk', vehicles: { tuktuk: { name: 'Tuktuk', icon: '🛺', fare: {} } } };
+const FALLBACK_CONFIG = { defaultVehicle: 'tuktuk', vehicles: { tuktuk: { name: 'Tuktuk', icon: '🛺' } } };
 let appConfigPromise = null;
 
 function loadAppConfig() {
   if (!appConfigPromise) {
     appConfigPromise = fetch('config.json', { cache: 'no-cache' })
       .then((res) => (res.ok ? res.json() : null))
-      .then((cfg) => (cfg && cfg.vehicles && cfg.vehicles[cfg.defaultVehicle] ? cfg : FALLBACK_CONFIG))
+      .then((cfg) => (cfg && isObject(cfg.vehicles) && cfg.vehicles[cfg.defaultVehicle] ? cfg : FALLBACK_CONFIG))
       .catch(() => FALLBACK_CONFIG);
   }
   return appConfigPromise;
@@ -202,32 +294,30 @@ function vehicleOnline(key, cfg, rateSet) {
   return !!onlineBlock(key, cfg, rateSet);
 }
 
-// Admin fare rates for an extra vehicle type: Admin value, else config.json default
-function vehicleAdminRates(admin, key, cfg) {
-  const fare = (cfg.vehicles[key] || {}).fare || {};
+// Rate figures saved by older versions of the app: top-level fields for the main type (the fuel price for
+// every type), and "vehicleRates" for the others. They still win over config.json.
+function legacyRates(admin, key, cfg) {
+  if (key === cfg.defaultVehicle) {
+    return Object.fromEntries(Object.keys(RATE_DEFAULTS).filter((f) => admin[f] !== undefined).map((f) => [f, admin[f]]));
+  }
   const own = (admin.vehicleRates || {})[key] || {};
-  return {
-    minimumFare: own.minimumFare ?? fare.minimumFare ?? admin.minimumFare,
-    perKmRate: own.perKmRate ?? fare.perKm ?? admin.perKmRate,
-    waitingPerHour: own.waitingPerHour ?? fare.waitingPerHour ?? admin.waitingPerHour
-  };
+  return Object.fromEntries(Object.entries({
+    fuelPrice: admin.fuelPrice, minimumFare: own.minimumFare, perKmRate: own.perKmRate, waitingPerHour: own.waitingPerHour
+  }).filter(([, v]) => v !== undefined));
 }
 
 // Fare settings for one vehicle type. Layers, last one wins:
-//   defaults (config.json / built-in) -> online rates file (API) -> figures changed on this phone (Admin).
+//   built-in -> config.json -> figures saved by older versions -> online rates file (API) -> changed on this phone (Admin)
 //   admin   = this phone's settings (loadSettings())
 //   rateSet = fetchOnlineRateSet() result
-// Main type: its online block ("THREE_WHEELER", or the top-level fields of an older file), else Admin.
-// Other types: their online block ("BIKE", "CAR"), else their Admin rates / config.json defaults;
-// shared Admin settings (fuel price, waiting on/off, partial km...) fill in anything a block leaves out.
 function vehicleSettings(admin, key, cfg, rateSet) {
   const saved = Number((admin.perKmCalculated || {})[key]);
   const perKmOverride = (admin.useCalculated || {})[key] && saved > 0 ? saved : null; // ticked cost per km price
+  const configRates = readRateBlock(cfg.vehicles[key] || {});
   const online = onlineBlock(key, cfg, rateSet) || {};
   const vehicleNo = (admin.vehicleNumbers || {})[key] || ''; // this type's number plate (receipts)
   const local = (admin.localOverrides || {})[key] || {};     // changed on this phone
-  if (key === cfg.defaultVehicle) return { ...admin, ...online, ...local, perKmOverride, vehicleNo };
-  return { ...admin, ...vehicleAdminRates(admin, key, cfg), ...online, ...local, perKmOverride, vehicleNo };
+  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, perKmOverride, vehicleNo };
 }
 
 // Rs. added to (or taken off) the per km price because of the fuel price.
@@ -262,9 +352,38 @@ function formatWaiting(mins) {
   return [h ? `${h} h` : '', m || !h ? `${m} min` : ''].filter(Boolean).join(' ');
 }
 
+// Waiting minutes actually charged: the free minutes are taken off, the rest is charged in whole blocks.
+// e.g. 5 free, blocks of 15: 4 min -> 0, 6 min -> 15, 21 min -> 30
+function billedWaitingMins(mins, s) {
+  const grace = Math.max(0, Number(s.waitingGraceMins) || 0);
+  const step = Math.max(1, Number(s.waitingStepMins) || 1);
+  return mins > grace ? Math.ceil((mins - grace) / step) * step : 0;
+}
+
+// Total rounding: 'down' | 'up' | 'nearest' to fareRoundTo Rs. (default down to 10)
+function roundFare(exact, s) {
+  const to = Number(s.fareRoundTo) > 0 ? Number(s.fareRoundTo) : 10;
+  const steps = Math.round((exact / to) * 1e6) / 1e6; // ignore float noise like 89.99999999
+  const n = s.fareRoundMode === 'up' ? Math.ceil(steps) : s.fareRoundMode === 'nearest' ? Math.round(steps) : Math.floor(steps);
+  return n * to;
+}
+
+// e.g. "rounded down to 10", "rounded to the nearest 5"
+function roundingText(s) {
+  const to = Number(s.fareRoundTo) > 0 ? Number(s.fareRoundTo) : 10;
+  return s.fareRoundMode === 'up' ? `rounded up to ${to}` : s.fareRoundMode === 'nearest' ? `rounded to the nearest ${to}` : `rounded down to ${to}`;
+}
+
+// e.g. "first 5 min free, then per 15 min", "" when every minute is charged
+function waitingRuleText(s) {
+  const grace = Math.max(0, Number(s.waitingGraceMins) || 0);
+  const step = Math.max(1, Number(s.waitingStepMins) || 1);
+  return [grace ? `first ${grace} min free` : '', step > 1 ? `charged per ${step} min` : ''].filter(Boolean).join(', ');
+}
+
 /**
  * Distance fare = km × per km price (incl. fuel adjustment), but never less than the minimum fare.
- * Fare = distance fare + waiting charge, then rounded down to the nearest 10.
+ * Fare = distance fare + waiting charge (after free minutes, in blocks), then rounded (default down to 10).
  */
 function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0) {
   // Round to 2 decimals first so float errors (4.1 - 1.1 = 2.9999999999999996) can't change the fare
@@ -276,17 +395,18 @@ function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0) {
   const minimumFare = Number(s.minimumFare);
   const waitRate = waitingRate(s);
   const waitMins = waitRate ? Math.max(0, Math.round(Number(waitingMins) || 0)) : 0;
-  const waitingPart = round2((waitMins / 60) * waitRate);
+  const billedMins = billedWaitingMins(waitMins, s);
+  const waitingPart = round2((billedMins / 60) * waitRate);
   if (km === 0) {
-    return { km, perKmRate, minimumFare, kmPart: 0, minimumApplied: false, distanceFare: 0, waitRate, waitMins: 0, waitingPart: 0, exact: 0, total: 0 };
+    return { km, perKmRate, minimumFare, kmPart: 0, minimumApplied: false, distanceFare: 0, waitRate, waitMins: 0, billedMins: 0, waitingPart: 0, exact: 0, total: 0 };
   }
 
   const kmPart = round2(km * perKmRate);
   const minimumApplied = kmPart < minimumFare;
   const distanceFare = minimumApplied ? minimumFare : kmPart;
   const exact = round2(distanceFare + waitingPart);
-  const total = Math.floor(exact / 10) * 10; // round DOWN to nearest 10 (e.g. 89 -> 80, 68.68 -> 60)
-  return { km, perKmRate, minimumFare, kmPart, minimumApplied, distanceFare, waitRate, waitMins, waitingPart, exact, total };
+  const total = roundFare(exact, s); // default DOWN to nearest 10 (e.g. 89 -> 80, 68.68 -> 60)
+  return { km, perKmRate, minimumFare, kmPart, minimumApplied, distanceFare, waitRate, waitMins, billedMins, waitingPart, exact, total };
 }
 
 function formatMoney(amount, s = loadSettings()) {

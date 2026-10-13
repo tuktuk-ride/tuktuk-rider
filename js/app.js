@@ -19,11 +19,13 @@ function showRateInfo(source) {
     `Per km: ${formatMoney(effectivePerKmRate(settings), settings)}` +
     fuelNote() +
     (settings.roundUpKm ? '  •  partial km charged as full km' : '') +
-    (waitingRate(settings) ? `  •  Waiting: ${formatMoney(waitingRate(settings), settings)}/hour` : '');
+    (waitingRate(settings) ? `  •  Waiting: ${formatMoney(waitingRate(settings), settings)}/hour` +
+      (waitingRuleText(settings) ? ` (${waitingRuleText(settings)})` : '') : '');
   $('rateSource').textContent = source;
 
   $('waitingCard').classList.toggle('hidden', !waitingRate(settings));
-  $('waitingInfo').textContent = `Charged at ${formatMoney(waitingRate(settings), settings)} per hour.`;
+  $('waitingInfo').textContent = `Charged at ${formatMoney(waitingRate(settings), settings)} per hour` +
+    (waitingRuleText(settings) ? ` (${waitingRuleText(settings)}).` : '.');
 }
 
 // ---------- Vehicle type ----------
@@ -71,7 +73,7 @@ function applyVehicle(key, remember = true) {
   const online = vehicleOnline(key, appConfig, rateSet);
   updateExpresswayBox();
   showRateInfo(online
-    ? (changed ? '✓ Official online rates, with figures changed on this phone' : '✓ Official online rates')
+    ? onlineSourceText(rateSet) + (changed ? ', with figures changed on this phone' : '')
     : (changed ? "Using this phone's rates" : 'Using the default rates'));
   if (lastTrip && !$('resultCard').classList.contains('hidden')) {
     // a map trip needs this vehicle's own route (e.g. no expressway for tuk-tuks); a meter trip keeps its km
@@ -153,10 +155,10 @@ function renderResult() {
     (f.minimumApplied ? `
     <tr><td>Minimum fare applied</td><td>${formatMoney(f.minimumFare, settings)}</td></tr>` : '') +
     (f.waitMins ? `
-    <tr><td>Waiting ${formatWaiting(f.waitMins)} × ${formatMoney(f.waitRate, settings)}/hour</td>
+    <tr><td>Waiting ${formatWaiting(f.waitMins)}${f.billedMins !== f.waitMins ? ` (charged ${formatWaiting(f.billedMins)})` : ''} × ${formatMoney(f.waitRate, settings)}/hour</td>
         <td>${formatMoney(f.waitingPart.toFixed(2), settings)}</td></tr>` : '') + `
     <tr><td>Exact amount</td><td>${formatMoney(f.exact.toFixed(2), settings)}</td></tr>
-    <tr><td><b>Total (rounded down to 10)</b></td><td><b>${formatMoney(f.total, settings)}</b></td></tr>` +
+    <tr><td><b>Total (${roundingText(settings)})</b></td><td><b>${formatMoney(f.total, settings)}</b></td></tr>` +
     (lastTrip.plusToll ? `
     <tr><td>Expressway toll (${lastTrip.route.expresswayKm} km on the expressway)</td><td>paid on top</td></tr>` : '');
 }

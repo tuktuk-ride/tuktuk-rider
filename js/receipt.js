@@ -102,9 +102,13 @@ function createReceiptPdf(trip, s = loadSettings()) {
     // Fare breakdown
     row(`${f.km.toFixed(2)} km x ${money(f.perKmRate)}`, money(f.kmPart.toFixed(2)));
     if (f.minimumApplied) row('Minimum fare applied', money(f.minimumFare));
+    if (f.waitMins && f.billedMins !== f.waitMins) row('Waiting charged', formatWaiting(f.billedMins));
     if (f.waitMins) row(`Waiting (${money(f.waitRate)}/hour)`, money(f.waitingPart.toFixed(2)));
     row('Exact amount', money(f.exact.toFixed(2)));
-    if (f.exact > f.total) row('Rounding (down to 10)', `- ${money((f.exact - f.total).toFixed(2))}`);
+    if (f.exact !== f.total) {
+      row(`Rounding (${roundingText(s).replace('rounded ', '')})`,
+        `${f.exact > f.total ? '-' : '+'} ${money(Math.abs(f.exact - f.total).toFixed(2))}`);
+    }
     divider();
 
     // Total

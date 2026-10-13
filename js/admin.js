@@ -11,6 +11,8 @@ const RATE_FIELDS = [
   { id: 'roundUpKm', label: 'Charge partial km as a full km (e.g. 3.2 km → 4 km)', group: 'fare', check: true },
   { id: 'waitingEnabled', label: 'Charge for waiting time', group: 'waiting', check: true },
   { id: 'waitingPerHour', label: 'Waiting charge per hour', group: 'waiting' },
+  { id: 'waitingGraceMins', label: 'Free waiting minutes', group: 'waiting', note: 'Waiting up to this is not charged. 0 = charged from the first minute' },
+  { id: 'waitingStepMins', label: 'Charge waiting in blocks of (minutes)', group: 'waiting', note: '1 = every minute. 15 = 1–15 min is charged as 15 min' },
   { id: 'fuelEnabled', label: 'Adjust the per km price by fuel price', group: 'fuel', check: true },
   { id: 'fuelPrice', label: 'Current fuel price (per litre)', group: 'fuel', note: 'Update this when the fuel price changes' },
   { id: 'baseFuelPrice', label: 'Base fuel price', group: 'fuel', note: 'The fuel price the per km price was set at' },
@@ -162,7 +164,7 @@ function fillVehicle(key) {
 function showSources(key) {
   const ref = referenceSettings(key);
   const s = loadSettings();
-  const block = onlineBlockName(key, appConfig);
+  const block = onlineBlockName(key, appConfig, rateSet);
   const refName = isOnline(key) ? 'API' : 'default';
   RATE_FIELDS.forEach((f) => {
     const line = $(`src_${key}_${f.id}`);
@@ -185,11 +187,14 @@ function showSources(key) {
 
   const changed = Object.keys(localFor(s, key)).length;
   const state = onlineBlockState(key, appConfig, rateSet);
+  const stoppedBy = rateSet.format === 1 ? 'IS_STOPPED true' : '"active" not true, or no valid minimumFare / perKm';
   $(`fnotice_${key}`).textContent =
-    (rateSet.reachable === false ? "The online rates file can't be reached right now (no internet, or the file has an error), so the defaults are used."
-      : state === 'active' ? `✓ Default values come from the "${block}" block of the online rates file.`
-      : state === 'stopped' ? `The "${block}" block in the online rates file is stopped (IS_STOPPED true), so the defaults are used.`
-        : `No "${block}" block in the online rates file, so the defaults are used.`) +
+    (rateSet.reachable === false && !rateSet.cachedAt ? "The online rates file can't be reached right now (no internet, or the file has an error), so the defaults are used."
+      : (rateSet.cachedAt ? `The online rates file can't be reached right now, so the copy saved on this phone is used (${onlineSourceText(rateSet).replace('✓ Official rates (', '').replace(')', '')}). ` : '') +
+        (state === 'active' ? `✓ Default values come from the "${block}" block of the online rates file` +
+            (rateSet.updatedAt ? ` (updated ${rateSet.updatedAt}).` : '.')
+          : state === 'stopped' ? `The "${block}" block in the online rates file is stopped (${stoppedBy}), so the defaults are used.`
+            : `No "${block}" block in the online rates file, so the defaults are used.`)) +
     (changed ? ` ✎ ${changed} figure${changed > 1 ? 's' : ''} changed on this phone.` : '');
   $(`fapi_${key}`).textContent = `↩ Use the ${refName} values for ${vname(key)}`;
   $(`fapi_${key}`).disabled = !changed;
@@ -201,8 +206,10 @@ function updateLive(key) {
   const money = (n) => formatMoney(n, s);
   const ex = (km) => `${km} km = ${money(calculateFare(km, s).total)}`;
   $(`fex_${key}`).textContent = isNaN(s.minimumFare) || isNaN(s.perKmRate) ? '' : `Examples: ${ex(1)} • ${ex(5)} • ${ex(10.5)}`;
+  const waitFor = (mins) => money(((billedWaitingMins(mins, s) / 60) * waitingRate(s)).toFixed(2));
   $(`wex_${key}`).textContent = waitingRate(s)
-    ? `Example: 25 min waiting = ${money(((25 / 60) * waitingRate(s)).toFixed(2))} • 1 h = ${money(waitingRate(s))}` : 'Waiting charge is off.';
+    ? `Example: 4 min = ${waitFor(4)} • 25 min = ${waitFor(25)} • 1 h = ${waitFor(60)}` +
+      (waitingRuleText(s) ? ` (${waitingRuleText(s)})` : '') : 'Waiting charge is off.';
 
   const info = $(`fuelinfo_${key}`);
   let summary = '';
@@ -385,6 +392,7 @@ $('settingsForm').addEventListener('input', (e) => {
 // ---------- Save ----------
 const VALIDATION = [
   ['minimumFare', (v) => v >= 0], ['perKmRate', (v) => v >= 0], ['waitingPerHour', (v) => v >= 0],
+  ['waitingGraceMins', (v) => v >= 0], ['waitingStepMins', (v) => v >= 1],
   ['fuelPrice', (v) => v > 0], ['baseFuelPrice', (v) => v > 0], ['fuelStep', (v) => v > 0],
   ['fuelStepChange', (v) => v >= 0], ['fuelMinPerKm', (v) => v >= 0], ['fuelMaxPerKm', (v) => v >= 0],
   ['kmPerLiter', (v) => v > 0]
