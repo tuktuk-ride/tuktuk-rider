@@ -9,16 +9,6 @@ const RATE_DEFAULTS = {
   roundUpKm: false,     // true = charge partial km as a full km
   fareRoundMode: 'down', // total rounded 'down' | 'up' | 'nearest'...
   fareRoundTo: 10,      // ...to this many Rs.
-  fuelEnabled: true,    // adjust the per km price by fuel price
-  // Fuel. Per km price moves by fuelStepChange for every fuelStep the fuel price
-  // is above/below the band of baseFuelPrice. Bands are multiples of fuelStep (400-424, 425-449...).
-  fuelPrice: 414,       // current fuel price per liter
-  baseFuelPrice: 414,   // fuel price the km prices were set at
-  fuelStep: 25,         // every Rs. 25 band...
-  fuelStepChange: 5,    // ...changes the per km price by Rs. 5
-  fuelMinPerKm: 50,     // fuel change never takes the per km price below this...
-  fuelMaxPerKm: 100,    // ...or above this
-  kmPerLiter: 28,       // info only: fuel cost per km
   waitingEnabled: true, // charge for waiting time
   waitingPerHour: 300,  // waiting charge per hour
   waitingGraceMins: 0,  // first minutes of waiting are free...
@@ -30,7 +20,7 @@ const DEFAULT_SETTINGS = {
   selectedVehicle: 'tuktuk',   // vehicle type last chosen on the fare page
   perKmCalculated: {},         // per km price saved from the Admin "Cost per km" tab, per type, e.g. { car: 66 }
   useCalculated: {},           // true = charge that saved price instead of the API/Admin per km price
-                               // (no fuel adjustment on top, fuel is part of the calculation), e.g. { car: true }
+                               // (fuel is part of that calculation), e.g. { car: true }
   currency: 'Rs.',
   mapProvider: 'osm',   // 'osm' = OpenStreetMap (free) | 'google' = Google Maps (needs API key)
   googleApiKey: '',     // Google Maps API key (Maps JavaScript API + Places API (New) + Routes API)
@@ -43,7 +33,10 @@ const DEFAULT_SETTINGS = {
 };
 
 // Settings saved by older versions used "1st km / next km" names: carry them over
-const OLD_NAMES = { firstKmRate: 'minimumFare', nextKmRate: 'perKmRate', fuelMinNextKm: 'fuelMinPerKm', fuelMaxNextKm: 'fuelMaxPerKm' };
+const OLD_NAMES = { firstKmRate: 'minimumFare', nextKmRate: 'perKmRate' };
+// Figures of the fuel adjustment, which was removed (the per km price now comes from the cost per km calculation)
+const REMOVED_FIELDS = ['returnPerKm', 'returnCalculated', 'fuelEnabled', 'fuelPrice', 'baseFuelPrice', 'fuelStep', 'fuelStepChange', 'fuelMinPerKm', 'fuelMaxPerKm',
+  'kmPerLiter', 'fuelMinNextKm', 'fuelMaxNextKm'];
 
 function loadSettings() {
   try {
@@ -65,6 +58,12 @@ function loadSettings() {
     // Older versions had one vehicle number for the phone: it becomes the tuktuk's
     if (saved.vehicleNo && !saved.vehicleNumbers) saved.vehicleNumbers = { tuktuk: saved.vehicleNo };
     delete saved.vehicleNo;
+    // Forget fuel adjustment figures, top level and changed on this phone
+    REMOVED_FIELDS.forEach((f) => delete saved[f]);
+    Object.entries(saved.localOverrides || {}).forEach(([k, o]) => {
+      REMOVED_FIELDS.forEach((f) => delete o[f]);
+      if (!Object.keys(o).length) delete saved.localOverrides[k];
+    });
     return { ...DEFAULT_SETTINGS, ...saved };
   } catch (e) {
     return { ...DEFAULT_SETTINGS };
@@ -89,8 +88,6 @@ function resetSettings() {
 // Both files use the same shape per vehicle type (keys as in config.json: "tuktuk", "bike", "car"):
 //   "fare":    { "minimumFare": 150, "perKm": 65, "roundUpKm": false, "roundMode": "down", "roundTo": 10 }
 //   "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 }
-//   "fuel":    { "enabled": true, "price": 414, "kmPerLitre": 25, "basePrice": 414,
-//                "stepEvery": 25, "stepAmount": 5, "minPerKm": 50, "maxPerKm": 100 }
 // Online rates file: { "schemaVersion": 2, "updatedAt": "2026-10-12", "vehicles": { "tuktuk": { "active": true, ... } } }
 //   "active": true is required, plus fare.minimumFare and fare.perKm; otherwise that type uses this phone's rates.
 //   Any other field left out (or null) = this phone decides (config.json default, or changed in Admin).
@@ -114,15 +111,7 @@ const RATE_MAP = [
   ['waiting', 'enabled', 'waitingEnabled', isBool],
   ['waiting', 'perHour', 'waitingPerHour', numberOk((n) => n >= 0)],
   ['waiting', 'graceMins', 'waitingGraceMins', numberOk((n) => n >= 0)],
-  ['waiting', 'stepMins', 'waitingStepMins', numberOk((n) => n >= 1)],
-  ['fuel', 'enabled', 'fuelEnabled', isBool],
-  ['fuel', 'price', 'fuelPrice', numberOk((n) => n > 0)],
-  ['fuel', 'kmPerLitre', 'kmPerLiter', numberOk((n) => n > 0)],
-  ['fuel', 'basePrice', 'baseFuelPrice', numberOk((n) => n > 0)],
-  ['fuel', 'stepEvery', 'fuelStep', numberOk((n) => n > 0)],
-  ['fuel', 'stepAmount', 'fuelStepChange', numberOk((n) => n >= 0)],
-  ['fuel', 'minPerKm', 'fuelMinPerKm', numberOk((n) => n >= 0)],
-  ['fuel', 'maxPerKm', 'fuelMaxPerKm', numberOk((n) => n >= 0)]
+  ['waiting', 'stepMins', 'waitingStepMins', numberOk((n) => n >= 1)]
 ];
 
 // Settings from one vehicle block of config.json / the online file. Invalid or out-of-limits values are left out.
@@ -135,7 +124,6 @@ function readRateBlock(block, limits = {}) {
     if (!valid(v) || (range && (v < range[0] || v > range[1]))) return;
     rates[setting] = v;
   });
-  if (rates.fuelMaxPerKm < rates.fuelMinPerKm) { delete rates.fuelMinPerKm; delete rates.fuelMaxPerKm; }
   return rates;
 }
 
@@ -161,18 +149,6 @@ function parseRateBlock(data) {
     const n = Number(data[key]);
     if (data[key] !== undefined && data[key] !== null && data[key] !== '' && isValid(n, key)) rates[setting] = n;
   });
-
-  // Fuel rule
-  take({
-    BASE_FUEL_PRICE: 'baseFuelPrice', CHANGE_PRICE_PER: 'fuelStep', CHANGE_AMOUNT: 'fuelStepChange',
-    MIN_CHANGE: 'fuelMinPerKm', MAX_CHANGE: 'fuelMaxPerKm'
-  }, (n, key) => (key === 'CHANGE_AMOUNT' ? n >= 0 : n > 0));
-
-  // Fuel price: from the API only when IS_FUEL_PRICE is true, otherwise admin settings
-  if (data.IS_FUEL_PRICE === true) {
-    take({ FUEL_PRICE: 'fuelPrice', PER_LITER: 'kmPerLiter' }, (n) => n > 0);
-    rates.fuelEnabled = rates.fuelPrice > 0; // no usable API fuel price -> no fuel adjustment (never guess)
-  }
 
   // Waiting charge: from the API only when IS_WAITING is true, otherwise admin settings
   if (data.IS_WAITING === true) {
@@ -294,50 +270,57 @@ function vehicleOnline(key, cfg, rateSet) {
   return !!onlineBlock(key, cfg, rateSet);
 }
 
-// Rate figures saved by older versions of the app: top-level fields for the main type (the fuel price for
-// every type), and "vehicleRates" for the others. They still win over config.json.
+// Rate figures saved by older versions of the app: top-level fields for the main type, and "vehicleRates"
+// for the others. They still win over config.json.
 function legacyRates(admin, key, cfg) {
   if (key === cfg.defaultVehicle) {
     return Object.fromEntries(Object.keys(RATE_DEFAULTS).filter((f) => admin[f] !== undefined).map((f) => [f, admin[f]]));
   }
   const own = (admin.vehicleRates || {})[key] || {};
   return Object.fromEntries(Object.entries({
-    fuelPrice: admin.fuelPrice, minimumFare: own.minimumFare, perKmRate: own.perKmRate, waitingPerHour: own.waitingPerHour
+    minimumFare: own.minimumFare, perKmRate: own.perKmRate, waitingPerHour: own.waitingPerHour
   }).filter(([, v]) => v !== undefined));
 }
 
 // Fare settings for one vehicle type. Layers, last one wins:
 //   built-in -> config.json -> figures saved by older versions -> online rates file (API) -> changed on this phone (Admin)
+//   -> the Cost per km price when "Use the Cost per km price" is ticked
 //   admin   = this phone's settings (loadSettings())
 //   rateSet = fetchOnlineRateSet() result
 function vehicleSettings(admin, key, cfg, rateSet) {
   const saved = Number((admin.perKmCalculated || {})[key]);
-  const perKmOverride = (admin.useCalculated || {})[key] && saved > 0 ? saved : null; // ticked cost per km price
+  const useCalc = !!(admin.useCalculated || {})[key] && saved > 0;   // "Use the Cost per km price" ticked
+  const perKmOverride = useCalc ? saved : null;
+  const calc = useCalc ? { perKmRate: saved } : {};
   const configRates = readRateBlock(cfg.vehicles[key] || {});
   const online = onlineBlock(key, cfg, rateSet) || {};
   const vehicleNo = (admin.vehicleNumbers || {})[key] || ''; // this type's number plate (receipts)
   const local = (admin.localOverrides || {})[key] || {};     // changed on this phone
-  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, perKmOverride, vehicleNo };
+  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, ...calc, perKmOverride, vehicleNo };
 }
 
-// Rs. added to (or taken off) the per km price because of the fuel price.
-// e.g. base 414, step 25, change 5: 425-449 -> +5, 450-474 -> +10, 375-399 -> -5, below 375 -> -10
-function fuelAdjustment(s) {
-  if (!s.fuelEnabled) return 0;
-  const step = Number(s.fuelStep), change = Number(s.fuelStepChange);
-  const fuel = Number(s.fuelPrice), base = Number(s.baseFuelPrice);
-  if (!(step > 0) || !(fuel > 0) || !(base > 0) || isNaN(change)) return 0;
-  return (Math.floor(fuel / step) - Math.floor(base / step)) * change;
+// ---------- Trip expenses (Admin "Cost per km" figures) ----------
+const COST_STORE_KEY = 'tuktuk_cost_calc_v2'; // figures saved in the Cost per km tab, per vehicle type
+
+// What one km costs to run (no profit): [label, Rs per km, note] for each part
+function tripExpenseParts(x) {
+  const n = (v) => Number(v) || 0;
+  const div = (a, b) => (n(b) > 0 ? n(a) / n(b) : 0); // 0 instead of an error when dividing by 0
+  const parts = [
+    ['Fuel cost per km', div(x.fuelPrice, x.kmPerLitre), 'Fuel price ÷ km per litre'],
+    ['Servicing per km', div(x.serviceCost, x.serviceKm), 'Service cost ÷ km between services'],
+    ['Tyres per km', div(x.tyreCost, x.tyreKm), 'Tyre set ÷ km it lasts'],
+    ['Repairs & wear per km', n(x.repairsPerKm), ''],
+    ['Depreciation per km', n(x.depreciationPerKm), ''],
+    ['Fixed costs per km', div(x.yearlyFixed, x.kmPerYear), 'Yearly fixed costs ÷ km per year']
+  ];
+  if (n(x.driverMonthly)) parts.push(['Driver income per km', div(n(x.driverMonthly) * 12, x.kmPerYear), 'Monthly target × 12 ÷ km per year']);
+  return parts;
 }
 
-// Per km price actually charged = base per km price (API or admin) + fuel adjustment,
-// kept within min..max. If the base price itself is outside min..max, no fuel adjustment is applied.
+// Per km price actually charged: the cost per km price when ticked in Admin, else the per km price (API / Admin)
 function effectivePerKmRate(s) {
-  if (Number(s.perKmOverride) > 0) return Number(s.perKmOverride); // cost calculator price wins
-  const base = Number(s.perKmRate);
-  const min = Number(s.fuelMinPerKm), max = Number(s.fuelMaxPerKm);
-  if (!s.fuelEnabled || base < min || base > max) return base;
-  return Math.min(max, Math.max(min, base + fuelAdjustment(s)));
+  return Number(s.perKmOverride) > 0 ? Number(s.perKmOverride) : Number(s.perKmRate);
 }
 
 // Waiting charge per hour actually used (0 = waiting charge off)
@@ -382,7 +365,7 @@ function waitingRuleText(s) {
 }
 
 /**
- * Distance fare = km × per km price (incl. fuel adjustment), but never less than the minimum fare.
+ * Distance fare = km × per km price, but never less than the minimum fare.
  * Fare = distance fare + waiting charge (after free minutes, in blocks), then rounded (default down to 10).
  */
 function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0) {

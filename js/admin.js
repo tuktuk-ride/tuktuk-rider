@@ -12,15 +12,7 @@ const RATE_FIELDS = [
   { id: 'waitingEnabled', label: 'Charge for waiting time', group: 'waiting', check: true },
   { id: 'waitingPerHour', label: 'Waiting charge per hour', group: 'waiting' },
   { id: 'waitingGraceMins', label: 'Free waiting minutes', group: 'waiting', note: 'Waiting up to this is not charged. 0 = charged from the first minute' },
-  { id: 'waitingStepMins', label: 'Charge waiting in blocks of (minutes)', group: 'waiting', note: '1 = every minute. 15 = 1–15 min is charged as 15 min' },
-  { id: 'fuelEnabled', label: 'Adjust the per km price by fuel price', group: 'fuel', check: true },
-  { id: 'fuelPrice', label: 'Current fuel price (per litre)', group: 'fuel', note: 'Update this when the fuel price changes' },
-  { id: 'baseFuelPrice', label: 'Base fuel price', group: 'fuel', note: 'The fuel price the per km price was set at' },
-  { id: 'fuelStep', label: 'For every fuel change of Rs.', group: 'fuel' },
-  { id: 'fuelStepChange', label: 'Per km price changes by Rs.', group: 'fuel' },
-  { id: 'fuelMinPerKm', label: 'Per km lowest price', group: 'fuel', note: 'The fuel change never goes below this…' },
-  { id: 'fuelMaxPerKm', label: 'Per km highest price', group: 'fuel', note: '…or above this' },
-  { id: 'kmPerLiter', label: 'Km per litre', group: 'fuel', note: 'Info only: shows the fuel cost per km' }
+  { id: 'waitingStepMins', label: 'Charge waiting in blocks of (minutes)', group: 'waiting', note: '1 = every minute. 15 = 1–15 min is charged as 15 min' }
 ];
 
 let appConfig = FALLBACK_CONFIG;
@@ -46,8 +38,15 @@ const usedSettings = (key) => vehicleSettings(loadSettings(), key, appConfig, ra
 // Settings without this phone's changes (= API value, else default)
 const referenceSettings = (key) => vehicleSettings({ ...loadSettings(), localOverrides: {} }, key, appConfig, rateSet);
 
-// 'local' (changed on this phone) | 'api' | 'default'
+// Fields filled from the Cost per km tab while "Use the Cost per km prices" is ticked
+function calcFields(key) {
+  const s = loadSettings();
+  return (s.useCalculated || {})[key] && Number((s.perKmCalculated || {})[key]) > 0 ? ['perKmRate'] : [];
+}
+
+// 'calc' (Cost per km tab, ticked) | 'local' (changed on this phone) | 'api' | 'default'
 function sourceOf(key, id) {
+  if (calcFields(key).includes(id)) return 'calc';
   if (localFor(loadSettings(), key)[id] !== undefined) return 'local';
   const block = onlineBlock(key, appConfig, rateSet);
   return block && block[id] !== undefined ? 'api' : 'default';
@@ -99,11 +98,6 @@ function buildVehicleUi() {
       <h3 class="sub">⏱ Waiting charge</h3>
       ${group('waiting')}
       <p class="hint" id="wex_${key}"></p>
-      <details class="fuel-box" id="fuelbox_${key}">
-        <summary>⛽ Fuel adjustment <span class="fuel-sum" id="fsum_${key}"></span></summary>
-        ${group('fuel')}
-        <div class="notice" id="fuelinfo_${key}"></div>
-      </details>
       <p class="hint" id="fex_${key}"></p>
       <button class="btn small secondary" type="button" id="fapi_${key}"></button>`;
     RATE_FIELDS.forEach((f) => {
@@ -162,7 +156,7 @@ function fillVehicle(key) {
 
 // "API" / "Default" / "Changed on this phone ↩" under each field + the panel notice
 function showSources(key) {
-  const ref = referenceSettings(key);
+  const ref = vehicleSettings({ ...loadSettings(), localOverrides: {}, useCalculated: {} }, key, appConfig, rateSet);
   const s = loadSettings();
   const block = onlineBlockName(key, appConfig, rateSet);
   const refName = isOnline(key) ? 'API' : 'default';
@@ -172,7 +166,10 @@ function showSources(key) {
     const refText = f.check ? (ref[f.id] ? 'on' : 'off') : formatMoney(ref[f.id], s).replace(s.currency + ' ', '');
     line.innerHTML = '';
     line.className = 'src-line src-' + src;
-    if (src === 'local') {
+    $(fid(key, f.id)).disabled = src === 'calc'; // set by the tick below, not typed
+    if (src === 'calc') {
+      line.textContent = `🧮 From the Cost per km tab (${refName}: ${refText}) — untick "Use the Cost per km prices" to change it`;
+    } else if (src === 'local') {
       line.append(`✎ Changed on this phone (${refName}: ${refText}) `);
       const b = document.createElement('button');
       b.type = 'button';
@@ -200,7 +197,7 @@ function showSources(key) {
   $(`fapi_${key}`).disabled = !changed;
 }
 
-// Examples, waiting example and fuel summary from what is typed (before saving)
+// Fare and waiting examples from what is typed (before saving)
 function updateLive(key) {
   const s = formSettings(key);
   const money = (n) => formatMoney(n, s);
@@ -210,35 +207,6 @@ function updateLive(key) {
   $(`wex_${key}`).textContent = waitingRate(s)
     ? `Example: 4 min = ${waitFor(4)} • 25 min = ${waitFor(25)} • 1 h = ${waitFor(60)}` +
       (waitingRuleText(s) ? ` (${waitingRuleText(s)})` : '') : 'Waiting charge is off.';
-
-  const info = $(`fuelinfo_${key}`);
-  let summary = '';
-  info.innerHTML = '';
-  if (s.perKmOverride > 0) {
-    summary = 'not used (cost per km price)';
-    info.textContent = `Fuel adjustment is not used while the cost per km price (${money(s.perKmOverride)}) is ticked.`;
-  } else if (!s.fuelEnabled) {
-    summary = 'off';
-    info.textContent = 'Fuel adjustment is off: the per km price is not changed by the fuel price.';
-  } else if (['fuelPrice', 'fuelStep', 'baseFuelPrice', 'perKmRate'].some((f) => !(s[f] > 0))) {
-    summary = '';
-  } else {
-    const adj = fuelAdjustment(s);
-    const charged = effectivePerKmRate(s);
-    const change = charged - s.perKmRate;
-    const sign = (n) => (n < 0 ? '-' : '+');
-    const lowBand = Math.floor(s.fuelPrice / s.fuelStep) * s.fuelStep;
-    let note = '';
-    if (s.perKmRate < s.fuelMinPerKm || s.perKmRate > s.fuelMaxPerKm) note = ' (per km price is outside the limits, so no fuel change)';
-    else if (change !== adj) note = ` (limited to ${money(change > 0 || adj > 0 ? s.fuelMaxPerKm : s.fuelMinPerKm)})`;
-    summary = change ? `${sign(change)}${money(Math.abs(change))} per km` : 'no change now';
-    [
-      s.kmPerLiter > 0 ? `Fuel cost per km: ${money((s.fuelPrice / s.kmPerLiter).toFixed(2))}` : 'Fuel cost per km: - (km per litre not set)',
-      `Fuel band: ${lowBand} – ${lowBand + s.fuelStep - 0.01} → per km ${sign(adj)} ${money(Math.abs(adj))}`,
-      `Per km price charged: ${money(s.perKmRate)} ${sign(change)} ${money(Math.abs(change))} = ${money(charged)}${note}`
-    ].forEach((t) => { const d = document.createElement('div'); d.textContent = t; info.appendChild(d); });
-  }
-  $(`fsum_${key}`).textContent = summary ? `— ${summary}` : '';
 }
 
 function fillForm() {
@@ -315,34 +283,43 @@ function updateCalcBoxes() {
     const name = vname(key);
     const saved = Number((s.perKmCalculated || {})[key]);
     const used = !!(s.useCalculated || {})[key] && saved > 0;
-    const base = effectivePerKmRate(vehicleSettings({ ...s, useCalculated: {} }, key, appConfig, rateSet));
+    const plain = vehicleSettings({ ...s, useCalculated: {} }, key, appConfig, rateSet); // without the tick
+    const m = (n) => formatMoney(n, s);
+    const refName = isOnline(key) ? 'API' : 'default';
     $(`usecalc_${key}`).checked = used;
     $(`usecalc_${key}`).disabled = !(saved > 0);
     $(`usecalcText_${key}`).textContent = saved > 0
-      ? `Use the cost per km price (${formatMoney(saved, s)}) instead of the per km price above`
-      : 'Use the cost per km price instead of the per km price above';
+      ? `Use the Cost per km price (${m(saved)} per km)` : 'Use the Cost per km price';
     $(`usecalcHint_${key}`).textContent = !(saved > 0)
       ? `No ${name} cost per km price saved yet. Work one out in the 🧮 Cost per km tab and press Save.`
-      : used ? `✓ ${name} is charged ${formatMoney(saved, s)} per km on this phone (instead of ${formatMoney(base, s)}). Fuel adjustment is not added.`
-        : `${name} is charged ${formatMoney(base, s)} per km.`;
+      : used ? `✓ Applied from the 🧮 Cost per km tab (${m(saved)} per km). Untick to go back to the ${refName} price (${m(effectivePerKmRate(plain))} per km).`
+        : `Now charging the ${refName} price: ${m(effectivePerKmRate(plain))} per km.`;
     $(`calcSlot_${key}`).classList.toggle('active', used);
     updateLive(key);
   });
+}
+
+// The per km field shows the price in use (the Cost per km price while ticked)
+function showCalcFields(key) {
+  $(fid(key, 'perKmRate')).value = usedSettings(key).perKmRate;
+  showSources(key);
 }
 
 function setUseCalculated(key, on) {
   const s = loadSettings();
   s.useCalculated = { ...(s.useCalculated || {}), [key]: on };
   if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
+  showCalcFields(key);
   updateCalcBoxes();
   CostCalc.refresh();
-  toast(on ? `✅ ${vname(key)}: using the cost per km price` : `↩ ${vname(key)}: back to the per km price`);
+  toast(on ? `✅ ${vname(key)}: using the Cost per km price` : `↩ ${vname(key)}: back to the ${isOnline(key) ? 'API' : 'default'} price`);
 }
 
 function saveCalculatorPrice(perKm, key) {
   const s = loadSettings();
   s.perKmCalculated = { ...(s.perKmCalculated || {}), [key]: perKm };
   if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
+  showCalcFields(key);
   updateCalcBoxes();
   const used = (s.useCalculated || {})[key];
   toast(`💾 ${vname(key)}: ${formatMoney(perKm, s)} saved` + (used ? ' and in use' : ' — tick it in Fare rates to use it'));
@@ -392,10 +369,7 @@ $('settingsForm').addEventListener('input', (e) => {
 // ---------- Save ----------
 const VALIDATION = [
   ['minimumFare', (v) => v >= 0], ['perKmRate', (v) => v >= 0], ['waitingPerHour', (v) => v >= 0],
-  ['waitingGraceMins', (v) => v >= 0], ['waitingStepMins', (v) => v >= 1],
-  ['fuelPrice', (v) => v > 0], ['baseFuelPrice', (v) => v > 0], ['fuelStep', (v) => v > 0],
-  ['fuelStepChange', (v) => v >= 0], ['fuelMinPerKm', (v) => v >= 0], ['fuelMaxPerKm', (v) => v >= 0],
-  ['kmPerLiter', (v) => v > 0]
+  ['waitingGraceMins', (v) => v >= 0], ['waitingStepMins', (v) => v >= 1]
 ];
 
 $('settingsForm').addEventListener('submit', (e) => {
@@ -424,16 +398,11 @@ $('settingsForm').addEventListener('submit', (e) => {
     if (Object.keys(local).length) s.localOverrides[key] = local;
 
     if (s.enabledVehicles.includes(key)) {
-      const merged = { ...ref, ...local };
       const bad = VALIDATION.find(([f, ok]) => !ok(form[f]));
-      const badLimits = !bad && !(merged.fuelMaxPerKm >= merged.fuelMinPerKm);
-      if (bad || badLimits) {
+      if (bad) {
         activeFareTab = key;
         renderFareTabs();
-        const field = bad ? RATE_FIELDS.find((x) => x.id === bad[0]) : null;
-        if ((field && field.group === 'fuel') || badLimits) $(`fuelbox_${key}`).open = true;
-        return toast(badLimits ? `${vname(key)}: per km highest price must be more than the lowest`
-          : `${vname(key)}: please enter a valid "${field.label}"`);
+        return toast(`${vname(key)}: please enter a valid "${RATE_FIELDS.find((x) => x.id === bad[0]).label}"`);
       }
     }
   }

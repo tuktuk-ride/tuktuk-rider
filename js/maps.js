@@ -3,8 +3,14 @@
 //   search(query)                   -> Promise<[{ label, lat, lng }]>
 //   setMarker(which, pos, onDrag)   which = 'start' | 'end', pos = { lat, lng }
 //   removeMarker(which)
-//   route(a, b, { avoidExpressways }) -> Promise<{ km, mins, path: [{ lat, lng }], expressway, fallback }>
-//                                    shortest legal route; avoidExpressways for 3-wheelers / motorbikes
+//   route(a, b, { avoidExpressways, prefer }, via) -> Promise<{ km, mins, path, expressway, expresswayParts, fallback, options }>
+//                                    the suggested route + options: every route found (up to 3, suggested first)
+//                                    prefer 'shortest' (tuk-tuks, bikes) | 'main' (cars: the router's normal best route)
+//                                    avoidExpressways for 3-wheelers / motorbikes
+//                                    via { lat, lng }: one route that passes there (the rider's own road)
+//   drawRoutes(routes, selected, { onPick, onLineTap })  routes [{ path, color, expresswayParts }]: the selected one
+//                                    on top; tap another to pick it, tap / press the selected one for a ✚ pin
+//   setVia(pos, onMoved, startEvent) / removeVia()        the draggable ✚ pin of the rider's own road
 //   reverse(pos) (optional)         -> Promise<address string | null>
 //   drawRoute(path) / clearRoute()
 //   fit(points) / focus(pos, zoom)
@@ -51,11 +57,32 @@ function decodePolyline6(str) {
   return path;
 }
 
-async function valhallaRoute(a, b, { avoidExpressways = false } = {}) {
+// One Valhalla trip (all legs joined) -> route. expresswayParts: the stretches on the expressway
+function valhallaTrip(t) {
+  const path = [], parts = [];
+  let expresswayKm = 0;
+  t.legs.forEach((leg) => {
+    const pts = decodePolyline6(leg.shape);
+    const offset = path.length ? path.length - 1 : 0; // legs share their joining point
+    path.push(...(path.length ? pts.slice(1) : pts));
+    (leg.maneuvers || []).filter((m) => m.highway).forEach((m) => {
+      expresswayKm += m.length || 0;
+      parts.push(path.slice(offset + m.begin_shape_index, offset + m.end_shape_index + 1));
+    });
+  });
+  return {
+    km: t.summary.length, mins: Math.round(t.summary.time / 60), path,
+    expressway: !!t.summary.has_highway, expresswayKm: Math.round(expresswayKm * 10) / 10, expresswayParts: parts
+  };
+}
+
+// Every route Valhalla found, suggested one first (only one when it must pass a via point)
+async function valhallaRoute(a, b, { avoidExpressways = false, prefer = 'shortest' } = {}, via = null) {
   const request = {
-    locations: [{ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }],
+    locations: [{ lat: a.lat, lon: a.lng }, ...(via ? [{ lat: via.lat, lon: via.lng, type: 'through' }] : []), { lat: b.lat, lon: b.lng }],
     costing: 'auto',
-    costing_options: { auto: { shortest: true, exclude_highways: !!avoidExpressways } },
+    costing_options: { auto: { shortest: prefer !== 'main', exclude_highways: !!avoidExpressways } },
+    alternates: via ? 0 : 2, // up to 2 other routes to choose from
     units: 'kilometers',
     directions_type: 'maneuvers' // tells which parts are on the expressway
   };
@@ -64,14 +91,7 @@ async function valhallaRoute(a, b, { avoidExpressways = false } = {}) {
   try {
     const res = await fetch(`${VALHALLA_URL}?json=${encodeURIComponent(JSON.stringify(request))}`, { signal: ctrl.signal });
     const data = await res.json().catch(() => null);
-    if (data && data.trip) {
-      const t = data.trip;
-      const expresswayKm = (t.legs[0].maneuvers || []).filter((m) => m.highway).reduce((sum, m) => sum + (m.length || 0), 0);
-      return {
-        km: t.summary.length, mins: Math.round(t.summary.time / 60), path: decodePolyline6(t.legs[0].shape),
-        expressway: !!t.summary.has_highway, expresswayKm: Math.round(expresswayKm * 10) / 10
-      };
-    }
+    if (data && data.trip) return [data.trip, ...(data.alternates || []).map((x) => x.trip)].map(valhallaTrip);
     const err = new Error(data && data.error_code ? 'no road route found between these points.' : 'route service unavailable');
     err.noRoute = !!(data && data.error_code); // the service answered: there is no such route
     throw err;
@@ -80,25 +100,31 @@ async function valhallaRoute(a, b, { avoidExpressways = false } = {}) {
   }
 }
 
-async function osrmRoute(a, b) {
-  const res = await fetch(`${OSRM_URL}${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
+async function osrmRoute(a, b, { prefer = 'shortest' } = {}, via = null) {
+  const at = [a, ...(via ? [via] : []), b].map((p) => `${p.lng},${p.lat}`).join(';');
+  const res = await fetch(`${OSRM_URL}${at}?overview=full&geometries=geojson${via ? '' : '&alternatives=2'}`);
   if (!res.ok) throw new Error('the free route service is busy. Please try again in a moment.');
   const data = await res.json();
   if (data.code !== 'Ok' || !data.routes.length) throw new Error(data.message || 'No road route found between these points.');
-  const r = data.routes[0];
-  return {
+  const routes = data.routes.map((r) => ({
     km: r.distance / 1000,
     mins: Math.round(r.duration / 60),
     path: r.geometry.coordinates.map(([lng, lat]) => ({ lat, lng })),
     expressway: null, // unknown
     fallback: true
-  };
+  }));
+  return prefer === 'main' ? routes : routes.sort((x, y) => x.km - y.km);
 }
+
+// The suggested route (first), with every route found as its options
+const withOptions = (routes) => ({ ...routes[0], options: routes });
+const EXPRESSWAY_COLOR = '#d50000'; // expressway stretches of a route, drawn over its own colour
 
 // ======================= OpenStreetMap (free, no key) =======================
 // Map: Leaflet + OSM tiles. Search: Nominatim. Road distance: OSRM public server.
 function createOsmProvider() {
-  let map, routeLayer;
+  let map, routeLayer, viaMarker;
+  let ignoreClickUntil = 0; // the click a browser sends at the end of a ✚ pin drag is not a new A/B pin
   const markers = {};
 
   const pinIcon = (text) => L.divIcon({
@@ -119,7 +145,7 @@ function createOsmProvider() {
         maxZoom: 19,
         attribution: '© OpenStreetMap contributors'
       }).addTo(map);
-      map.on('click', (e) => onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng }));
+      map.on('click', (e) => { if (Date.now() >= ignoreClickUntil) onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng }); });
     },
 
     async reverse(pos) {
@@ -161,23 +187,71 @@ function createOsmProvider() {
       markers[which] = null;
     },
 
-    async route(a, b, opts = {}) {
+    async route(a, b, opts = {}, via = null) {
       try {
-        return await valhallaRoute(a, b, opts);
+        return withOptions(await valhallaRoute(a, b, opts, via));
       } catch (e) {
         if (e.noRoute) throw e;
-        return osrmRoute(a, b); // Valhalla unreachable: fastest car route (may use an expressway)
+        return withOptions(await osrmRoute(a, b, opts, via)); // Valhalla unreachable: car routes (may use an expressway)
       }
     },
 
     drawRoute(path) {
+      this.drawRoutes([{ path, color: '#1a73e8' }], 0);
+    },
+
+    drawRoutes(routes, selected, { onPick, onLineTap } = {}) {
       this.clearRoute();
-      routeLayer = L.polyline(path.map((p) => [p.lat, p.lng]), { color: '#1a73e8', weight: 5 }).addTo(map);
+      const layers = [];
+      const ll = (p) => p.map((x) => [x.lat, x.lng]);
+      // the others first, so the selected route is drawn on top
+      routes.map((r, i) => i).filter((i) => i !== selected).concat(selected).forEach((i) => {
+        const r = routes[i], on = i === selected;
+        const style = { weight: on ? 7 : 5, opacity: on ? 1 : 0.7, bubblingMouseEvents: false }; // a tap on a route is not a new A/B pin
+        if (on) layers.push(L.polyline(ll(r.path), { color: '#fff', weight: 11, opacity: 0.9, interactive: false })); // white edge
+        const lines = [L.polyline(ll(r.path), { ...style, color: r.color })]
+          .concat((r.expresswayParts || []).map((p) => L.polyline(ll(p), { ...style, color: EXPRESSWAY_COLOR })));
+        lines.forEach((pl) => {
+          if (!on && onPick) pl.on('click', () => onPick(i));
+          // press (and drag) / tap on the selected route: a ✚ pin there, for the rider's own road
+          if (on && onLineTap) pl.on('mousedown', (e) => onLineTap({ lat: e.latlng.lat, lng: e.latlng.lng }, e.originalEvent));
+        });
+        layers.push(...lines);
+      });
+      routeLayer = L.layerGroup(layers).addTo(map);
     },
 
     clearRoute() {
       if (routeLayer) map.removeLayer(routeLayer);
       routeLayer = null;
+    },
+
+    // ✚ pin of the rider's own road. startEvent: the press on the route, so the pin follows the same drag
+    setVia(pos, onMoved, startEvent) {
+      this.removeVia();
+      viaMarker = L.marker([pos.lat, pos.lng], { icon: pinIcon('✚'), draggable: true, zIndexOffset: 1000 }).addTo(map);
+      viaMarker.on('dragstart', () => (ignoreClickUntil = Infinity));
+      viaMarker.on('dragend', () => {
+        ignoreClickUntil = Date.now() + 500;
+        map.dragging.enable();
+        const p = viaMarker.getLatLng();
+        onMoved({ lat: p.lat, lng: p.lng });
+      });
+      if (startEvent && startEvent.type === 'mousedown') {
+        map.dragging.disable(); // the press moves the pin, not the map
+        const restore = () => {
+          map.dragging.enable();
+          ignoreClickUntil = Date.now() + 500; // tap or drag: the click that follows is not a new A/B pin
+          document.removeEventListener('mouseup', restore);
+        };
+        document.addEventListener('mouseup', restore);
+        try { viaMarker.dragging._draggable._onDown(startEvent); } catch (e) { /* tap only: the pin can still be dragged */ }
+      }
+    },
+
+    removeVia() {
+      if (viaMarker) map.removeLayer(viaMarker);
+      viaMarker = null;
     },
 
     fit(points) {
@@ -197,7 +271,7 @@ function createOsmProvider() {
 // ======================= Google Maps (needs API key) =======================
 // Needs: Maps JavaScript API, Places API (New), Routes API enabled for the key.
 function createGoogleProvider(apiKey) {
-  let map, routeLine;
+  let map, routeLine, viaMarker;
   const markers = {};
 
   return {
@@ -263,7 +337,7 @@ function createGoogleProvider(apiKey) {
       markers[which] = null;
     },
 
-    async route(a, b, opts = {}) {
+    async route(a, b, opts = {}, via = null) {
       const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
         method: 'POST',
         headers: {
@@ -274,33 +348,64 @@ function createGoogleProvider(apiKey) {
         body: JSON.stringify({
           origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } },
           destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } },
+          ...(via ? { intermediates: [{ via: true, location: { latLng: { latitude: via.lat, longitude: via.lng } } }] } : {}),
           travelMode: 'DRIVE',
           routingPreference: 'TRAFFIC_UNAWARE',
-          computeAlternativeRoutes: true,
+          computeAlternativeRoutes: !via, // up to 3 routes to choose from
           routeModifiers: { avoidHighways: !!opts.avoidExpressways }
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Route request failed');
       if (!data.routes || !data.routes.length) throw new Error('No road route found between these points.');
-      const r = data.routes.reduce((best, x) => (x.distanceMeters < best.distanceMeters ? x : best)); // shortest
-      return {
+      const routes = data.routes.map((r) => ({
         expressway: opts.avoidExpressways ? false : null,
         km: r.distanceMeters / 1000,
         mins: Math.round(parseInt(r.duration, 10) / 60),
         path: google.maps.geometry.encoding.decodePath(r.polyline.encodedPolyline)
           .map((p) => ({ lat: p.lat(), lng: p.lng() }))
-      };
+      }));
+      // Google lists its best route first ("main"); shortest first for tuk-tuks / bikes
+      return withOptions(opts.prefer === 'main' ? routes : routes.sort((x, y) => x.km - y.km));
     },
 
     drawRoute(path) {
+      this.drawRoutes([{ path, color: '#1a73e8' }], 0);
+    },
+
+    drawRoutes(routes, selected, { onPick, onLineTap } = {}) {
       this.clearRoute();
-      routeLine = new google.maps.Polyline({ path, strokeColor: '#1a73e8', strokeWeight: 5, map });
+      routeLine = [];
+      routes.map((r, i) => i).filter((i) => i !== selected).concat(selected).forEach((i) => { // selected on top
+        const r = routes[i], on = i === selected;
+        const line = (p, color) => {
+          const pl = new google.maps.Polyline({
+            path: p, map, clickable: !!(on ? onLineTap : onPick), zIndex: on ? 3 : 1,
+            strokeColor: color, strokeWeight: on ? 7 : 5, strokeOpacity: on ? 1 : 0.7
+          });
+          if (!on && onPick) pl.addListener('click', () => onPick(i));
+          if (on && onLineTap) pl.addListener('click', (e) => onLineTap({ lat: e.latLng.lat(), lng: e.latLng.lng() }));
+          routeLine.push(pl);
+        };
+        line(r.path, r.color);
+        (r.expresswayParts || []).forEach((p) => line(p, EXPRESSWAY_COLOR));
+      });
     },
 
     clearRoute() {
-      if (routeLine) routeLine.setMap(null);
+      (routeLine || []).forEach((l) => l.setMap(null));
       routeLine = null;
+    },
+
+    setVia(pos, onMoved) {
+      this.removeVia();
+      viaMarker = new google.maps.Marker({ position: pos, map, label: '✚', draggable: true, zIndex: 1000 });
+      viaMarker.addListener('dragend', (e) => onMoved({ lat: e.latLng.lat(), lng: e.latLng.lng() }));
+    },
+
+    removeVia() {
+      if (viaMarker) viaMarker.setMap(null);
+      viaMarker = null;
     },
 
     fit(points) {

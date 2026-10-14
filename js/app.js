@@ -6,18 +6,16 @@ let settings = adminSettings;                        // fare settings of the sel
 const $ = (id) => document.getElementById(id);
 
 // ---------- Rates (online file first, admin settings as fallback) ----------
-// e.g. " (incl. fuel +Rs. 5)" - the change actually applied after the min/max limits
-function fuelNote() {
-  if (Number(settings.perKmOverride) > 0) return ' (admin cost calculator price)';
-  const applied = effectivePerKmRate(settings) - Number(settings.perKmRate);
-  return applied ? ` (incl. fuel ${applied > 0 ? '+' : '-'}${formatMoney(Math.abs(applied), settings)})` : '';
+// " (admin cost calculator price)" while the cost per km price is ticked in Admin
+function priceNote() {
+  return Number(settings.perKmOverride) > 0 ? ' (admin cost calculator price)' : '';
 }
 
 function showRateInfo(source) {
   $('rateInfo').textContent =
     `Minimum fare: ${formatMoney(settings.minimumFare, settings)}  •  ` +
     `Per km: ${formatMoney(effectivePerKmRate(settings), settings)}` +
-    fuelNote() +
+    priceNote() +
     (settings.roundUpKm ? '  •  partial km charged as full km' : '') +
     (waitingRate(settings) ? `  •  Waiting: ${formatMoney(waitingRate(settings), settings)}/hour` +
       (waitingRuleText(settings) ? ` (${waitingRuleText(settings)})` : '') : '');
@@ -33,7 +31,11 @@ function showRateInfo(source) {
 // the others use them only when "Use the expressway" is ticked. The toll is not added to the fare:
 // a fare on an expressway route reads "Rs. 1,100 + expressway toll".
 const expresswayAllowed = (key) => !(appConfig.vehicles[key] || {}).avoidExpressways;
-const routeOptions = (key) => ({ avoidExpressways: !(expresswayAllowed(key) && $('useExpressway').checked) });
+// "routePreference" in config.json: 'main' = the main road first (cars), else the shortest route first
+const routeOptions = (key) => ({
+  avoidExpressways: !(expresswayAllowed(key) && $('useExpressway').checked),
+  prefer: (appConfig.vehicles[key] || {}).routePreference === 'main' ? 'main' : 'shortest'
+});
 const usesExpressway = (r, key) => !!(r && r.expressway && expresswayAllowed(key) && $('useExpressway').checked);
 const TOLL_WORDS = ' + expressway toll';
 
@@ -53,11 +55,14 @@ $('useExpressway').addEventListener('change', () => {
   if (shown && points.start && points.end) $('calcMapBtn').click();
 });
 
-function routeNote(r, opts) {
-  if (r.fallback && opts.avoidExpressways) return 'route may use an expressway (the expressway-free route service could not be reached)';
-  if (opts.avoidExpressways) return 'shortest route without expressways';
-  if (r.expressway) return r.expresswayKm ? `shortest route, ${r.expresswayKm} km on the expressway` : 'shortest route, via the expressway';
-  return 'shortest route (no expressway needed)';
+// how: 'suggested' | 'chosen' (another route from the list) | 'own' (the rider's own road, via the ✚ pin)
+function routeNote(r, opts, how = 'suggested') {
+  const kind = how === 'own' ? 'your own road (via the ✚ pin)' : how === 'chosen' ? 'route you chose'
+    : opts.prefer === 'main' ? 'main road route' : 'shortest route';
+  if (r.fallback && opts.avoidExpressways) return `${kind} (may use an expressway: the expressway-free route service could not be reached)`;
+  if (opts.avoidExpressways) return `${kind} without expressways`;
+  if (r.expressway) return r.expresswayKm ? `${kind}, ${r.expresswayKm} km on the expressway` : `${kind}, via the expressway`;
+  return `${kind} (no expressway needed)`;
 }
 
 // Types ticked in Admin, in config.json order (at least the main type)
@@ -116,6 +121,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.classList.add('active');
     $(tab.dataset.panel).classList.add('active');
     placeWaitingBox(tab.dataset.panel);
+    if (tab.dataset.panel === 'mapPanel') setTimeout(() => provider && provider.resize && provider.resize(), 50); // map was hidden
   });
 });
 placeWaitingBox(document.querySelector('.tab.active').dataset.panel);
@@ -144,10 +150,12 @@ function renderResult() {
   lastTrip.plusToll = lastTrip.mode === 'map' && usesExpressway(lastTrip.route, currentVehicle);
   const f = calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins);
   $('resultDistance').textContent = `${vehicleLabel(appConfig, currentVehicle)}  •  Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
+    (lastTrip.mode === 'distance' ? ' (entered)' : '') +
     (settings.roundUpKm ? ` (charged as ${f.km} km)` : '') +
     (f.waitMins ? `  •  Waiting: ${formatWaiting(f.waitMins)}` : '');
   $('resultTotal').textContent = formatMoney(f.total, settings) + (lastTrip.plusToll ? TOLL_WORDS : '');
   $('resultDuration').textContent = lastTrip.durationText || '';
+  renderRouteChoices();
 
   $('resultBreakdown').innerHTML = `
     <tr><td>${f.km.toFixed(2)} km × ${formatMoney(f.perKmRate, settings)}</td>
@@ -162,6 +170,118 @@ function renderResult() {
     (lastTrip.plusToll ? `
     <tr><td>Expressway toll (${lastTrip.route.expresswayKm} km on the expressway)</td><td>paid on top</td></tr>` : '');
 }
+
+// ---------- Route choices (map trips) ----------
+// Every route found, with its km, time and fare; the rider taps the road they will really take,
+// or drags a ✚ pin onto another road ("your own road", one more option)
+const ROUTE_COLORS = ['#1a73e8', '#8e24aa', '#00897b'];  // route 1, 2, 3 (also the dots in the list)
+const OWN_ROAD_COLOR = '#ef6c00';
+let viaPoint = null; // the ✚ pin
+
+const routeColor = (r, i) => (r.own ? OWN_ROAD_COLOR : ROUTE_COLORS[i % ROUTE_COLORS.length]);
+
+function renderRouteChoices() {
+  const routes = lastTrip.mode === 'map' ? lastTrip.routes || [] : [];
+  $('routeChoices').classList.toggle('hidden', !routes.length);
+  if (!routes.length) return;
+  const found = routes.filter((r) => !r.own).length;
+  const minKm = Math.min(...routes.map((r) => r.km)), minMins = Math.min(...routes.map((r) => r.mins));
+  $('routeChoiceTitle').textContent = routes.length > 1
+    ? `🛣 Choose the road (${found} route${found > 1 ? 's' : ''} found${viaPoint ? ' + your own road' : ''})` : '🛣 Road';
+  const list = $('routeChoiceList');
+  list.innerHTML = '';
+  routes.forEach((r, i) => {
+    const fare = calculateFare(r.km, settings, lastTrip.waitingMins).total;
+    const tags = routes.length > 1 ? [r.km === minKm ? 'shortest' : '', r.mins === minMins ? 'fastest' : ''].filter(Boolean).join(', ') : '';
+    const onExpressway = usesExpressway(r, currentVehicle);
+    const item = document.createElement('div');
+    item.className = 'route-choice' + (i === lastTrip.routeIndex ? ' selected' : '');
+    item.style.borderColor = i === lastTrip.routeIndex ? routeColor(r, i) : '';
+    item.setAttribute('role', 'button');
+    item.tabIndex = 0;
+    item.innerHTML = '<span class="route-dot"></span><span class="rc-text"><b></b><small></small></span><span class="rc-fare"></span>';
+    item.querySelector('.route-dot').style.background = routeColor(r, i);
+    item.querySelector('b').textContent = (r.own ? 'Your road (via ✚ pin)' : `Route ${i + 1}`) + (tags ? ` (${tags})` : '');
+    item.querySelector('small').textContent = `${r.km.toFixed(2)} km  •  ~${r.mins} min` +
+      (onExpressway ? `  •  🛣 ${r.expresswayKm ? r.expresswayKm + ' km on' : 'uses'} the expressway` : '');
+    item.querySelector('.rc-fare').textContent = formatMoney(fare, settings) + (onExpressway ? ' + toll' : '');
+    item.addEventListener('click', () => selectRoute(i));
+    item.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && selectRoute(i));
+    if (r.own) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'rc-remove';
+      x.title = 'Remove your own road';
+      x.textContent = '✕';
+      x.addEventListener('click', (e) => { e.stopPropagation(); clearVia(true); });
+      item.appendChild(x);
+    }
+    list.appendChild(item);
+  });
+  $('routeExpresswayLegend').classList.toggle('hidden', !routes.some((r) => usesExpressway(r, currentVehicle)));
+  $('ownRoadBtn').textContent = viaPoint ? '✚ Drag the ✚ pin on the map onto your road' : '➕ Choose my own road';
+  $('ownRoadBtn').disabled = !!viaPoint;
+}
+
+function drawTripRoutes() {
+  provider.drawRoutes(lastTrip.routes.map((r, i) => ({
+    path: r.path, color: routeColor(r, i),
+    expresswayParts: usesExpressway(r, currentVehicle) ? (r.expresswayParts && r.expresswayParts.length ? r.expresswayParts : [r.path]) : []
+  })), lastTrip.routeIndex, { onPick: selectRoute, onLineTap: placeVia });
+}
+
+function selectRoute(i) {
+  if (!lastTrip || lastTrip.mode !== 'map' || !lastTrip.routes[i]) return;
+  const r = lastTrip.routes[i];
+  Object.assign(lastTrip, {
+    routeIndex: i, route: r, distanceKm: r.km, mins: r.mins,
+    durationText: `Approx. travel time: ${r.mins} min  •  ${routeNote(r, lastTrip.routeOpts, r.own ? 'own' : i ? 'chosen' : 'suggested')}`
+  });
+  renderResult();
+  drawTripRoutes();
+}
+
+// ✚ pin: put it on the route (tap / press), then drag it onto the road the rider will take
+function placeVia(pos, startEvent) {
+  if (!lastTrip || lastTrip.mode !== 'map') return;
+  viaPoint = pos;
+  provider.setVia(pos, (p) => { viaPoint = p; routeViaPin(); }, startEvent);
+  renderRouteChoices();
+  mapError();
+}
+
+// The rider's own road: the route through the ✚ pin, one more option (selected)
+async function routeViaPin() {
+  const trip = lastTrip;
+  if (!trip || trip.mode !== 'map' || !viaPoint) return;
+  mapError('Finding a road through the ✚ pin…');
+  try {
+    const r = await provider.route(points.start, points.end, trip.routeOpts, viaPoint);
+    if (lastTrip !== trip) return; // trip changed meanwhile
+    const own = { ...r, own: true, options: undefined };
+    const i = trip.routes.findIndex((x) => x.own);
+    if (i >= 0) trip.routes[i] = own; else trip.routes.push(own);
+    mapError();
+    selectRoute(i >= 0 ? i : trip.routes.length - 1);
+  } catch (err) {
+    mapError('No road found through the ✚ pin: ' + err.message + ' Drag the pin onto a road.');
+  }
+}
+
+// Remove the ✚ pin (and, when asked, its road from the list)
+function clearVia(fromList = false) {
+  viaPoint = null;
+  if (provider && provider.removeVia) provider.removeVia();
+  if (!fromList || !lastTrip || !lastTrip.routes) return;
+  const wasOwn = lastTrip.route && lastTrip.route.own;
+  lastTrip.routes = lastTrip.routes.filter((r) => !r.own);
+  if (wasOwn) selectRoute(0); else { renderResult(); drawTripRoutes(); }
+}
+
+$('ownRoadBtn').addEventListener('click', () => {
+  const p = lastTrip && lastTrip.route && lastTrip.route.path;
+  if (p && p.length) placeVia(p[Math.floor(p.length / 2)]); // middle of the selected route
+});
 
 function hideResult() {
   $('resultCard').classList.add('hidden');
@@ -207,6 +327,36 @@ $('clearMeterBtn').addEventListener('click', () => {
   hideResult();
 });
 
+// ---------- Distance mode (km typed in) ----------
+const MAX_DISTANCE_KM = 1000; // more than this is surely a typo
+
+$('calcDistanceBtn').addEventListener('click', async () => {
+  await ratesReady;
+  $('distanceError').textContent = '';
+  const km = parseFloat($('distanceKm').value);
+  if (!(km > 0)) {
+    $('distanceError').textContent = 'Please enter the trip distance in km.';
+    return hideResult();
+  }
+  if (km > MAX_DISTANCE_KM) {
+    $('distanceError').textContent = `Please check the distance: more than ${MAX_DISTANCE_KM} km.`;
+    return hideResult();
+  }
+  if (isPassenger()) return passengerDistanceEstimate(km); // every vehicle type
+  showResult(km, '', { mode: 'distance' });
+});
+
+// Distance changed: old fare/receipt no longer valid
+$('distanceKm').addEventListener('input', hideResult);
+$('distanceKm').addEventListener('keydown', (e) => e.key === 'Enter' && $('calcDistanceBtn').click());
+
+$('clearDistanceBtn').addEventListener('click', () => {
+  clearWaiting();
+  $('distanceKm').value = '';
+  $('distanceError').textContent = '';
+  hideResult();
+});
+
 // ---------- Map mode (OpenStreetMap or Google, chosen in Admin) ----------
 const points = { start: null, end: null };
 const pointLabels = { start: '', end: '' };
@@ -232,6 +382,7 @@ function setPoint(which, pos, label) {
     `${which === 'start' ? 'A' : 'B'}: ${label || 'Pinned on map'} (${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)})`;
   provider.setMarker(which, pos, (p) => setPoint(which, p, 'Pinned on map'));
   provider.clearRoute();
+  clearVia(); // a new start / end: the ✚ pin belonged to the old trip
   hideResult(); // trip changed: old fare/receipt no longer valid
   mapError();
   if (points.start && points.end) provider.fit([points.start, points.end]);
@@ -355,12 +506,14 @@ $('calcMapBtn').addEventListener('click', async () => {
     const opts = routeOptions(currentVehicle);
     const r = await provider.route(points.start, points.end, opts);
     if (r.km < 0.01) throw new Error('start and end are the same place.');
-    provider.drawRoute(r.path);
     provider.fit([points.start, points.end]);
     mapError();
     showResult(r.km, `Approx. travel time: ${r.mins} min  •  ${routeNote(r, opts)}`, {
-      mode: 'map', from: pointLabels.start, to: pointLabels.end, mins: r.mins, route: r
+      mode: 'map', from: pointLabels.start, to: pointLabels.end, mins: r.mins, route: r,
+      routes: r.options || [r], routeIndex: 0, routeOpts: opts
     });
+    drawTripRoutes();
+    if (viaPoint) await routeViaPin(); // keep the rider's own road (e.g. after changing vehicle type)
   } catch (err) {
     mapError('Could not calculate route: ' + err.message);
     hideResult();
@@ -379,6 +532,7 @@ $('clearMapBtn').addEventListener('click', () => {
     $(w + 'Results').classList.add('hidden');
   });
   provider && provider.clearRoute();
+  clearVia();
   mapError();
   hideResult();
 });

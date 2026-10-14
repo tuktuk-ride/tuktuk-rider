@@ -37,8 +37,10 @@ function applyMode() {
   $('modeSwitch').title = isPassenger() ? 'Switch to Rider mode' : 'Switch to Passenger mode';
   hideResult();
   if (isPassenger()) {
-    document.querySelector('.tab[data-panel="mapPanel"]').click(); // passengers use the map only
+    // passengers use the map or a typed distance (no meter)
+    if (document.querySelector('.tab.active').dataset.panel === 'meterPanel') document.querySelector('.tab[data-panel="mapPanel"]').click();
     $('calcMapBtn').textContent = 'Estimate fare';
+    $('calcDistanceBtn').textContent = 'Estimate fare';
     ratesReady.then(() => isPassenger() && updateExpresswayBox());
     $('waitingTitle').textContent = '⏱ Expected waiting (optional)';
     ratesReady.then(() => {
@@ -48,6 +50,7 @@ function applyMode() {
     });
   } else {
     $('calcMapBtn').textContent = 'Calculate Fare';
+    $('calcDistanceBtn').textContent = 'Calculate Fare';
     $('waitingTitle').textContent = '⏱ Waiting time';
     ratesReady.then(() => { if (appMode === 'rider') applyVehicle(currentVehicle, false); }); // rider's waiting box / rates
   }
@@ -79,6 +82,11 @@ async function passengerEstimate() {
   showEstimates(routes);
 }
 
+// Typed distance: the same km for every vehicle type, no route
+function passengerDistanceEstimate(km) {
+  showEstimates(Object.fromEntries(Object.keys(appConfig.vehicles).map((k) => [k, { km, entered: true }])));
+}
+
 // Official rates only: built-in defaults + online file, nothing changed on this phone
 const officialBase = () => ({ ...DEFAULT_SETTINGS, currency: adminSettings.currency || DEFAULT_SETTINGS.currency });
 
@@ -98,7 +106,7 @@ function showEstimates(routes) {
 function estimateFor(key, route, waitMins) {
   const s = vehicleSettings(officialBase(), key, appConfig, rateSet);
   const low = calculateFare(route.km, s, waitMins).total;
-  const high = calculateFare(route.km * ESTIMATE_SPREAD, s, waitMins).total;
+  const high = route.entered ? low : calculateFare(route.km * ESTIMATE_SPREAD, s, waitMins).total; // typed km: exact
   return { key, s, low, high, plusToll: usesExpressway(route, key), official: vehicleOnline(key, appConfig, rateSet) };
 }
 
@@ -112,11 +120,13 @@ function renderEstimates() {
   const waitMins = expectedWaitMins();
   const list = Object.keys(appConfig.vehicles).map((key) => ({ ...estimateFor(key, lastRoutes[key], waitMins), route: lastRoutes[key] }));
 
-  $('estimateTrip').textContent = 'Shortest route for each vehicle type' +
-    ($('useExpressway').checked ? ' (cars may use the expressway; tuk-tuks and bikes never)' : ' (no expressways)') +
+  const entered = list[0].route.entered;
+  $('estimateTrip').textContent = (entered ? `Distance entered: ${list[0].route.km} km`
+    : 'Shortest route for each vehicle type' +
+      ($('useExpressway').checked ? ' (cars may use the expressway; tuk-tuks and bikes never)' : ' (no expressways)')) +
     (waitMins ? `  •  ${formatWaiting(waitMins)} waiting` : '');
-  $('estimateFrom').textContent = 'From: ' + (pointLabels.start || '-');
-  $('estimateTo').textContent = 'To: ' + (pointLabels.end || '-');
+  $('estimateFrom').textContent = entered ? '' : 'From: ' + (pointLabels.start || '-');
+  $('estimateTo').textContent = entered ? '' : 'To: ' + (pointLabels.end || '-');
 
   const box = $('estimateList');
   box.innerHTML = '';
@@ -139,7 +149,7 @@ function renderEstimates() {
     ? 'Estimated with the official TukTuk Rider rates. '
     : "Today's official rates couldn't be loaded for every vehicle type, so standard rates are used where needed. ") +
     'The final fare is worked out by the driver from the actual distance and waiting time. ' +
-    'The range allows for small detours and traffic.';
+    (entered ? 'Worked out from the distance you entered.' : 'The range allows for small detours and traffic.');
   lastEstimates = list;
 }
 
@@ -148,8 +158,7 @@ let lastEstimates = [];
 function estimateText() {
   const lines = [
     '🛺 TukTuk Rider — fare estimate',
-    $('estimateFrom').textContent,
-    $('estimateTo').textContent,
+    ...[$('estimateFrom').textContent, $('estimateTo').textContent].filter(Boolean),
     $('estimateTrip').textContent.replace(/\s+•\s+/g, ' • '),
     ...lastEstimates.map((e) => `${vehicleLabel(appConfig, e.key)} (${e.route.km.toFixed(1)} km): ${priceText(e)}`)
   ];

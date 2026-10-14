@@ -1,5 +1,5 @@
 // Builds a receipt-style PDF (80mm wide, like a thermal slip) with jsPDF.
-// trip = { mode: 'map' | 'meter', vehicleName, from, to, startMeter, endMeter, distanceKm, mins, waitingMins, passenger, date }
+// trip = { mode: 'map' | 'meter' | 'distance', vehicleName, from, to, startMeter, endMeter, distanceKm, mins, waitingMins, passenger, date }
 
 // jsPDF's built-in font only supports basic Latin characters
 function pdfSafe(str) {
@@ -88,6 +88,8 @@ function createReceiptPdf(trip, s = loadSettings()) {
       block('FROM', trip.from);
       block('TO', trip.to);
       row('Method', 'Map route');
+    } else if (trip.mode === 'distance') {
+      row('Method', 'Distance entered');
     } else {
       row('Method', 'Meter reading');
       row('Start meter', `${trip.startMeter} km`);

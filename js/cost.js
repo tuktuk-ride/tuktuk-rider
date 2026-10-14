@@ -1,14 +1,17 @@
 // Admin "Cost per km" tab. Default figures per vehicle type come from config.json.
-//   cost per km   = fuel + servicing + tyres + repairs + depreciation + fixed costs (+ driver income, new)
-//   charge per km = cost per km × (1 + profit margin) × (1 + empty return allowance)
-//   trip fare     = max(km × charge per km, minimum fare) + waiting + tolls + parking + night charge
+//   expenses per km = fuel + servicing + tyres + repairs + depreciation + fixed costs (+ driver income)
+//   price per km    = expenses per km × (1 + profit margin)                           e.g. 33.03 × 1.50 = 49.55
+//     with "Include the empty return trip" ticked: + expenses per km once more (no profit)
+//                   = expenses + expenses × (1 + profit margin)          e.g. 33.03 + 33.03 × 1.50 = 82.58
+//   test a trip:  km × price per km (at least the minimum fare)
+//                 + waiting, tolls, parking, night charge (added separately: no × 2, no profit)
 // Each vehicle type keeps its own figures on this phone. Changes calculate straight away but are only
 // kept when "Save vehicle costs" is pressed; "Defaults" loads the config.json figures (then Save).
 // Used by admin.js:  CostCalc.init({ getCurrent(vehicle), getSaved(vehicle), onSave(perKm, vehicle), openFareTab(vehicle) })
 //                    and CostCalc.refresh()
 const CostCalc = (() => {
   const el = (id) => document.getElementById(id);
-  const STORE_KEY = 'tuktuk_cost_calc_v2';
+  const STORE_KEY = COST_STORE_KEY; // js/settings.js
 
   // Vehicle types and their default figures, loaded from config.json
   let VEHICLES = {};
@@ -33,8 +36,9 @@ const CostCalc = (() => {
     { id: 'yearlyFixed', label: 'Yearly fixed costs', note: 'Insurance, licence, emission test, lease' },
     { id: 'kmPerYear', label: 'Km driven per year' },
     { id: 'driverMonthly', label: 'Driver income target (per month)', note: 'Optional. 0 = not included' },
-    { id: 'profitPct', label: 'Profit margin (%)', note: 'Suggested 20–30%' },
-    { id: 'emptyPct', label: 'Empty return allowance (%)', note: 'Suggested 30–50% for driving back empty' }
+    { id: 'profitPct', label: 'Profit margin (%)', note: 'Added to the paid km only (one way, not to the empty way back)' },
+    { id: 'includeReturn', label: 'Include the empty return trip in the price per km', check: true,
+      note: 'Ticked: trip expenses × 2 (you come back empty) + profit on the one-way km. Untick for one way only.' }
   ];
   const TRIP_FIELDS = [
     { id: 'tripKm', label: 'Trip distance (km)' },
@@ -49,7 +53,7 @@ const CostCalc = (() => {
   const fid = (id) => 'cc_' + id; // input ids, kept apart from the Settings form ids
 
   let store = { vehicle: '', figures: {}, rounding: {} };
-  let hooks = { getCurrent: () => ({ perKm: 0, source: '' }), getSaved: () => null, onSave: () => {}, openFareTab: () => {} };
+  let hooks = { getCurrent: () => ({ perKm: 0, source: '' }), getSaved: () => 0, onSave: () => {}, openFareTab: () => {} };
   let lastPerKm = 0;
   let defaultsLoaded = false; // "Defaults" pressed and not saved yet
 
@@ -63,7 +67,6 @@ const CostCalc = (() => {
 
   const s = () => loadSettings();
   const money = (n) => formatMoney(Math.round(n * 100) / 100, s());
-  const div = (a, b) => (b > 0 ? a / b : 0); // 0 instead of an error when dividing by 0
 
   // ---------- Storage ----------
   function load() {
@@ -83,7 +86,7 @@ const CostCalc = (() => {
   function isDirty() {
     if (!el('cc_fuelPrice')) return false;
     const form = readFigures(), saved = figuresFor(store.vehicle);
-    return ALL_FIELDS.some((f) => form[f.id] !== Number(saved[f.id] ?? 0)) ||
+    return ALL_FIELDS.some((f) => form[f.id] !== (f.check ? !!saved[f.id] : Number(saved[f.id] ?? 0))) ||
       JSON.stringify(readRounding()) !== JSON.stringify(roundingFor(store.vehicle));
   }
 
@@ -113,38 +116,39 @@ const CostCalc = (() => {
   function buildInputs(fields, containerId) {
     fields.forEach((f) => {
       const wrap = document.createElement('div');
-      wrap.innerHTML = `<label for="${fid(f.id)}"></label>
-        <input type="number" id="${fid(f.id)}" inputmode="decimal" min="0" step="any">
-        ${f.note ? '<p class="hint"></p>' : ''}`;
-      wrap.querySelector('label').textContent = f.label;
+      wrap.innerHTML = (f.check
+        ? `<label class="check"><input type="checkbox" id="${fid(f.id)}"> <span></span></label>`
+        : `<label for="${fid(f.id)}"></label>
+        <input type="number" id="${fid(f.id)}" inputmode="decimal" min="0" step="any">`) +
+        (f.note ? '<p class="hint"></p>' : '');
+      wrap.querySelector(f.check ? 'span' : 'label').textContent = f.label;
       if (f.note) wrap.querySelector('.hint').textContent = f.note;
       el(containerId).appendChild(wrap);
     });
   }
-  const readFigures = () => Object.fromEntries(ALL_FIELDS.map((f) => [f.id, Math.max(0, parseFloat(el(fid(f.id)).value) || 0)]));
-  const fillFigures = (fig) => ALL_FIELDS.forEach((f) => (el(fid(f.id)).value = fig[f.id] ?? 0));
+  const readFigures = () => Object.fromEntries(ALL_FIELDS.map((f) =>
+    [f.id, f.check ? el(fid(f.id)).checked : Math.max(0, parseFloat(el(fid(f.id)).value) || 0)]));
+  const fillFigures = (fig) => ALL_FIELDS.forEach((f) => {
+    if (f.check) el(fid(f.id)).checked = !!fig[f.id]; else el(fid(f.id)).value = fig[f.id] ?? 0;
+  });
 
   // ---------- Calculation ----------
   function calculate(x) {
-    const parts = [
-      ['Fuel cost per km', div(x.fuelPrice, x.kmPerLitre), 'Fuel price ÷ km per litre'],
-      ['Servicing per km', div(x.serviceCost, x.serviceKm), 'Service cost ÷ km between services'],
-      ['Tyres per km', div(x.tyreCost, x.tyreKm), 'Tyre set ÷ km it lasts'],
-      ['Repairs & wear per km', x.repairsPerKm, ''],
-      ['Depreciation per km', x.depreciationPerKm, ''],
-      ['Fixed costs per km', div(x.yearlyFixed, x.kmPerYear), 'Yearly fixed costs ÷ km per year']
-    ];
-    if (x.driverMonthly) parts.push(['Driver income per km', div(x.driverMonthly * 12, x.kmPerYear), 'Monthly target × 12 ÷ km per year']);
+    const parts = tripExpenseParts(x); // js/settings.js
     const costPerKm = parts.reduce((sum, p) => sum + p[1], 0);
-    const withProfit = costPerKm * (1 + x.profitPct / 100);
-    const chargePerKm = withProfit * (1 + x.emptyPct / 100);
+    const ways = x.includeReturn ? 2 : 1;                     // ticked: the way back is empty, expenses × 2
+    const bothWaysPerKm = costPerKm * ways;
+    const profitPerKm = costPerKm * (x.profitPct / 100);      // profit on the one-way km only
+    const chargePerKm = bothWaysPerKm + profitPerKm;           // ticked: = expenses + expenses × (1 + profit)
 
-    const kmFare = x.tripKm * chargePerKm;
-    const distanceFare = Math.max(kmFare, x.minFare);
+    const expenses = x.tripKm * costPerKm;                    // trip expenses, no profit
+    const bothWays = expenses * ways;
+    const profit = expenses * (x.profitPct / 100);
+    const minTopUp = Math.max(0, x.minFare - (bothWays + profit)); // at least the minimum fare
     const waitingFare = (x.waitMins / 60) * x.waitPerHour;
-    const totalFare = distanceFare + waitingFare + x.tolls + x.parking + x.night;
+    const totalFare = bothWays + profit + minTopUp + waitingFare + x.tolls + x.parking + x.night;
     const quote = Math.floor(Math.round(totalFare * 100) / 100 / 10) * 10;
-    return { parts, costPerKm, withProfit, chargePerKm, kmFare, distanceFare, waitingFare, totalFare, quote };
+    return { parts, costPerKm, bothWaysPerKm, profitPerKm, chargePerKm, expenses, bothWays, profit, minTopUp, waitingFare, totalFare, quote };
   }
 
   function row(label, value, note = '', strong = false) {
@@ -174,10 +178,13 @@ const CostCalc = (() => {
     const rate = el('ccRateTable');
     rate.innerHTML = '';
     r.parts.forEach(([label, value, note]) => rate.appendChild(row(label, money(value), note)));
-    rate.appendChild(row('Total cost per km', money(r.costPerKm), '', true));
-    rate.appendChild(row(`Rate with profit (+${x.profitPct}%)`, money(r.withProfit)));
-    rate.appendChild(row(`+ Empty return (+${x.emptyPct}%)`, money(r.chargePerKm), '', true));
+    rate.appendChild(row('Trip expenses per km', money(r.costPerKm), 'No profit', true));
+    if (x.includeReturn) rate.appendChild(row('Way there + empty way back (× 2)', money(r.bothWaysPerKm)));
+    rate.appendChild(row(`Profit ${x.profitPct}% (one way: ${x.profitPct}% of ${money(r.costPerKm)})`, '+ ' + money(r.profitPerKm)));
+    rate.appendChild(row(x.includeReturn ? 'Price per km (empty return included)' : 'Price per km (one way)', money(r.chargePerKm), '', true));
     el('ccChargePerKm').textContent = money(r.chargePerKm);
+    el('ccChargeHint').textContent = x.includeReturn
+      ? 'Trip expenses × 2 (empty way back) + profit on the one-way km' : 'Trip expenses + profit (one way)';
 
     const cur = hooks.getCurrent(store.vehicle);
     const diff = cur.perKm - r.chargePerKm;
@@ -187,17 +194,20 @@ const CostCalc = (() => {
         (Math.abs(diff) < 0.5 ? 'about the same as the calculated charge.'
           : `${money(Math.abs(diff))} (${Math.abs(pct)}%) ${diff > 0 ? 'above' : 'below'} the calculated charge` +
             (diff < 0 ? ' — you may be losing money on each km.' : '.')) +
-        ` Running cost alone is ${money(r.costPerKm)} per km.`
+        ` Trip expenses alone are ${money(r.costPerKm)} per km.`
       : 'Enter the vehicle costs above.';
 
     const trip = el('ccTripTable');
     trip.innerHTML = '';
-    trip.appendChild(row(`Distance fare (${x.tripKm} km × ${money(r.chargePerKm)})`, money(r.kmFare)));
-    if (r.distanceFare > r.kmFare) trip.appendChild(row('Minimum fare applied', money(r.distanceFare)));
-    if (r.waitingFare) trip.appendChild(row(`Waiting (${x.waitMins} min)`, money(r.waitingFare)));
-    if (x.tolls) trip.appendChild(row('Expressway tolls', money(x.tolls)));
-    if (x.parking) trip.appendChild(row('Parking', money(x.parking)));
-    if (x.night) trip.appendChild(row('Night / early-morning charge', money(x.night)));
+    const add = (n) => '+ ' + money(n);
+    trip.appendChild(row(`Trip expenses (${x.tripKm} km × ${money(r.costPerKm)})`, money(r.expenses), 'No profit'));
+    if (x.includeReturn) trip.appendChild(row('Way there + empty way back (× 2)', money(r.bothWays)));
+    trip.appendChild(row(`Profit ${x.profitPct}% (one way: ${x.profitPct}% of ${money(r.expenses)})`, add(r.profit)));
+    if (r.minTopUp) trip.appendChild(row(`Minimum fare top-up (at least ${money(x.minFare)})`, add(r.minTopUp)));
+    if (r.waitingFare) trip.appendChild(row(`Waiting (${x.waitMins} min)`, add(r.waitingFare), 'Added separately'));
+    if (x.tolls) trip.appendChild(row('Expressway tolls', add(x.tolls), 'Added separately'));
+    if (x.parking) trip.appendChild(row('Parking', add(x.parking), 'Added separately'));
+    if (x.night) trip.appendChild(row('Night / early-morning charge', add(x.night), 'Added separately'));
     trip.appendChild(row('Total fare', money(r.totalFare)));
     trip.appendChild(row('Amount to quote the passenger', money(r.quote), '', true));
 
@@ -208,7 +218,7 @@ const CostCalc = (() => {
     el('ccSaveBtn').disabled = !(perKm > 0) || saved === perKm;
     el('ccSaveInfo').textContent =
       (saved > 0 && saved !== perKm ? `Saved now: ${money(saved)}. ` : '') +
-      `To charge it instead of the ${cur.online ? 'online (API)' : 'Admin'} price, tick "Use cost per km price" in Settings → Fare rates → ${name}.`;
+      `To charge it instead of the ${cur.online ? 'online (API)' : 'Admin'} price, tick "Use the Cost per km price" in Settings → Fare rates → ${name}.`;
     el('ccOpenFareBtn').textContent = `Open the ${VEHICLES[store.vehicle].icon || ''} ${name} fare rates`.replace('  ', ' ');
     el('ccOpenFareBtn').classList.toggle('hidden', !(saved > 0));
   }

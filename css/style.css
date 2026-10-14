@@ -323,9 +323,6 @@ header h1 a { color: inherit; font-size: inherit; font-weight: inherit; text-dec
 .src-line.src-local { color: #b45309; font-weight: 600; }
 .src-reset { border: none; background: none; color: #1a73e8; font-weight: 600; font-size: .75rem; padding: 2px 0; cursor: pointer; }
 .fare-panel h3.sub { font-size: .95rem; margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
-.fuel-box { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
-.fuel-box summary { font-weight: 700; font-size: .95rem; cursor: pointer; }
-.fuel-box .fuel-sum { font-weight: 400; color: var(--muted); font-size: .85rem; }
 .vno-label { margin-top: 14px; }
 
 /* Rider / Passenger mode (body[data-mode] is set by js/passenger.js) */
@@ -364,3 +361,22 @@ body.fare-page:not([data-mode]) main { visibility: hidden; } /* home page, until
 /* "Use the expressway" tick */
 .expressway-box { margin-top: 14px; }
 .expressway-box .hint { margin: 2px 0 0; }
+
+/* Route choices under a map fare: the selected route is blue, like its line on the map */
+.route-choices { margin: 12px 0 4px; text-align: left; }
+.rc-title { font-weight: 700; font-size: .95rem; }
+.route-choices .hint { margin: 2px 0 6px; }
+.route-choice {
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 6px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.route-choice.selected { border-width: 2px; background: #f7f9fc; }
+.route-dot { width: 16px; height: 16px; border-radius: 50%; flex: none; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--border); }
+.rc-remove { border: 0; background: none; color: var(--muted); font-size: 1rem; padding: 4px 6px; cursor: pointer; }
+.rc-legend { display: flex; align-items: center; gap: 6px; }
+.rc-swatch { display: inline-block; width: 22px; height: 5px; border-radius: 3px; background: #d50000; }
+#ownRoadBtn { margin-top: 10px; }
+.rc-text { display: flex; flex-direction: column; min-width: 0; }
+.rc-text small { color: var(--muted); }
+.rc-fare { margin-left: auto; font-weight: 700; white-space: nowrap; }

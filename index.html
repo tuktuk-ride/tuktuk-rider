@@ -56,9 +56,10 @@
       <p class="hint" id="rateSource"></p>
     </div>
 
-    <div class="tabs rider-only">
+    <div class="tabs">
       <button class="tab active" data-panel="mapPanel">📍 Map</button>
-      <button class="tab" data-panel="meterPanel">🔢 Meter</button>
+      <button class="tab rider-only" data-panel="meterPanel">🔢 Meter</button>
+      <button class="tab" data-panel="distancePanel">📏 Distance</button>
     </div>
 
     <!-- MAP MODE -->
@@ -123,6 +124,22 @@
       </div>
     </section>
 
+    <!-- DISTANCE MODE: km typed in -->
+    <section class="panel" id="distancePanel">
+      <div class="card">
+        <label for="distanceKm">Trip distance (km)</label>
+        <input type="number" id="distanceKm" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 7.5">
+        <p class="hint rider-only">Type the distance in km, e.g. an agreed distance or one from another map.</p>
+        <p class="hint passenger-only">Type the distance in km, e.g. from Google Maps. You'll see the fare for each vehicle type.</p>
+        <div class="waiting-slot"></div>
+        <div class="row">
+          <button class="btn secondary" id="clearDistanceBtn" type="button">Clear</button>
+          <button class="btn" id="calcDistanceBtn" type="button">Calculate Fare</button>
+        </div>
+        <div class="error" id="distanceError"></div>
+      </div>
+    </section>
+
     <!-- WAITING TIME: one box, moved by js/app.js into the open tab, just above Calculate Fare -->
     <div class="waiting-box hidden" id="waitingCard">
       <h2 id="waitingTitle">⏱ Waiting time</h2>
@@ -157,6 +174,14 @@
       <div class="distance" id="resultDistance"></div>
       <div class="total" id="resultTotal"></div>
       <div class="distance" id="resultDuration"></div>
+      <div class="route-choices hidden" id="routeChoices">
+        <div class="rc-title" id="routeChoiceTitle"></div>
+        <p class="hint">Tap the road you will take, here or on the map. The fare and receipt use that route.</p>
+        <div id="routeChoiceList"></div>
+        <p class="hint rc-legend hidden" id="routeExpresswayLegend"><span class="rc-swatch"></span> Red = the part on the expressway (toll paid on top)</p>
+        <button class="btn small secondary" id="ownRoadBtn" type="button">➕ Choose my own road</button>
+        <p class="hint">Not the right road? Tap the route on the map (or use the button) for a ✚ pin, then drag the pin onto the road you will take.</p>
+      </div>
       <table class="breakdown" id="resultBreakdown"></table>
 
       <div class="receipt-box">

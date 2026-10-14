@@ -4,11 +4,7 @@
   "ratesCacheDays": 14,
   "limits": {
     "fare": { "minimumFare": [0, 5000], "perKm": [1, 500], "roundTo": [1, 100] },
-    "waiting": { "perHour": [0, 3000], "graceMins": [0, 60], "stepMins": [1, 60] },
-    "fuel": {
-      "price": [100, 2000], "kmPerLitre": [1, 100], "basePrice": [100, 2000],
-      "stepEvery": [1, 500], "stepAmount": [0, 100], "minPerKm": [0, 500], "maxPerKm": [0, 500]
-    }
+    "waiting": { "perHour": [0, 3000], "graceMins": [0, 60], "stepMins": [1, 60] }
   },
   "defaultVehicle": "tuktuk",
   "vehicles": {
@@ -16,12 +12,9 @@
       "name": "Tuktuk",
       "icon": "🛺",
       "avoidExpressways": true,
+      "routePreference": "shortest",
       "fare": { "minimumFare": 150, "perKm": 65, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
-      "fuel": {
-        "enabled": true, "price": 414, "kmPerLitre": 25, "basePrice": 414,
-        "stepEvery": 25, "stepAmount": 5, "minPerKm": 50, "maxPerKm": 100
-      },
       "costDefaults": {
         "fuelPrice": 414,
         "kmPerLitre": 25,
@@ -35,7 +28,7 @@
         "kmPerYear": 30000,
         "driverMonthly": 0,
         "profitPct": 15,
-        "emptyPct": 30,
+        "includeReturn": true,
         "tripKm": 25,
         "minFare": 150,
         "waitMins": 30,
@@ -49,12 +42,9 @@
       "name": "Bike",
       "icon": "🏍️",
       "avoidExpressways": true,
+      "routePreference": "shortest",
       "fare": { "minimumFare": 100, "perKm": 45, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
-      "fuel": {
-        "enabled": true, "price": 414, "kmPerLitre": 40, "basePrice": 414,
-        "stepEvery": 25, "stepAmount": 3, "minPerKm": 35, "maxPerKm": 70
-      },
       "costDefaults": {
         "fuelPrice": 414,
         "kmPerLitre": 40,
@@ -68,7 +58,7 @@
         "kmPerYear": 30000,
         "driverMonthly": 0,
         "profitPct": 15,
-        "emptyPct": 30,
+        "includeReturn": true,
         "tripKm": 10,
         "minFare": 100,
         "waitMins": 15,
@@ -82,12 +72,9 @@
       "name": "Car",
       "icon": "🚗",
       "avoidExpressways": false,
+      "routePreference": "main",
       "fare": { "minimumFare": 400, "perKm": 75, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 400, "graceMins": 0, "stepMins": 1 },
-      "fuel": {
-        "enabled": true, "price": 414, "kmPerLitre": 15, "basePrice": 414,
-        "stepEvery": 25, "stepAmount": 10, "minPerKm": 60, "maxPerKm": 150
-      },
       "costDefaults": {
         "fuelPrice": 414,
         "kmPerLitre": 15,
@@ -101,7 +88,7 @@
         "kmPerYear": 30000,
         "driverMonthly": 0,
         "profitPct": 20,
-        "emptyPct": 20,
+        "includeReturn": true,
         "tripKm": 25,
         "minFare": 400,
         "waitMins": 30,
