@@ -1,7 +1,7 @@
 {
   "name": "TukTuk Rider",
   "short_name": "TukTuk Rider",
-  "description": "Three-wheeler fare calculator by map or meter reading.",
+  "description": "Fare calculator for tuktuks, bikes, cars, vans and mini buses: by map, meter or distance.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

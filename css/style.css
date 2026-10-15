@@ -281,7 +281,7 @@ header h1, .header-actions a, .install-btn { white-space: nowrap; }
 .calc-table tr.strong td { font-weight: 700; }
 .calc-table tr.trip-head td { padding-top: 14px; border-top: 2px solid var(--border); }
 .calc-table tr.trip-head:first-child td { border-top: 0; padding-top: 4px; }
-.calc-table td:last-child { white-space: nowrap; } /* amounts on one line */
+.breakdown td:last-child { white-space: nowrap; } /* amounts on one line (fare, receipt preview, Cost per km) */
 .charge-box { text-align: center; margin: 16px 0 12px; }
 .charge-box .total { font-size: 2rem; font-weight: 800; color: var(--accent); margin: 2px 0; }
 
@@ -296,7 +296,8 @@ select {
 }
 /* Fare rates tabs (one per vehicle type) */
 .fare-tabs { margin: 4px 0 8px; }
-.fare-tabs .tab { padding: 10px 6px; font-size: .9rem; }
+.fare-tabs { flex-wrap: wrap; }
+.fare-tabs .tab { padding: 10px 6px; font-size: .9rem; flex: 1 1 28%; min-width: 0; } /* up to 3 a row on a phone */
 .shared-rates { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--border); }
 .calc-price { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; }
 .calc-price.active { border: 1px solid #f3d27a; background: #fff7e0; }
@@ -404,3 +405,14 @@ body.fare-page:not([data-mode]) main { visibility: hidden; } /* home page, until
 .more-box { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--border); }
 .more-box summary { font-weight: 700; font-size: .95rem; cursor: pointer; }
 .src-line:empty { display: none; }
+
+/* Cost per km: "Work it out" boxes for repairs & wear and depreciation */
+.calc-box { margin: 6px 0 14px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; background: #fafbfc; }
+.calc-box summary { font-weight: 700; font-size: .9rem; cursor: pointer; }
+.calc-box summary span { font-weight: 400; color: var(--muted); }
+.calc-box[open] summary { margin-bottom: 6px; }
+.parts-head, .part-row { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr) 28px; gap: 6px; align-items: center; }
+.parts-head { font-size: .72rem; color: var(--muted); margin-bottom: 2px; }
+.part-row { margin-bottom: 6px; }
+.part-row input { min-width: 0; padding: 8px 6px; font-size: .85rem; margin: 0; }
+.p-del { border: 0; background: none; color: var(--muted); font-size: 1rem; cursor: pointer; padding: 0; }

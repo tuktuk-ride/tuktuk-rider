@@ -63,6 +63,11 @@ const routeOptions = (key) => ({
   prefer: (appConfig.vehicles[key] || {}).routePreference === 'main' ? 'main' : 'shortest'
 });
 const usesExpressway = (r, key) => !!(r && r.expressway && expresswayAllowed(key) && $('useExpressway').checked);
+// e.g. "tuktuk and bike": the types that never use expressways (config.json)
+const noExpresswayNames = () => {
+  const names = Object.values(appConfig.vehicles).filter((v) => v.avoidExpressways).map((v) => v.name.toLowerCase());
+  return names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names.join('');
+};
 const TOLL_WORDS = ' + expressway toll';
 
 // The tick only matters for vehicle types allowed on expressways
@@ -71,7 +76,7 @@ function updateExpresswayBox() {
   const anyAllowed = Object.keys(appConfig.vehicles).some(expresswayAllowed);
   $('expresswayBox').classList.toggle('hidden', passenger ? !anyAllowed : !expresswayAllowed(currentVehicle));
   $('expresswayHint').textContent = passenger
-    ? 'For cars. Tuk-tuks and bikes never use expressways. The toll is paid on top of the fare.'
+    ? `Not for ${noExpresswayNames() || 'every type'}: they never use expressways. The toll is paid on top of the fare.`
     : 'The toll is not included: the fare will read "+ expressway toll".';
 }
 
@@ -109,7 +114,7 @@ function applyVehicle(key, remember = true) {
     ? onlineSourceText(rateSet) + (changed ? ', with figures changed on this phone' : '')
     : (changed ? "Using this phone's rates" : 'Using the default rates'));
   if (lastTrip && !$('resultCard').classList.contains('hidden')) {
-    // a map trip needs this vehicle's own route (e.g. no expressway for tuk-tuks); a meter trip keeps its km
+    // a map trip needs this vehicle's own route (e.g. no expressway for a tuktuk); a meter trip keeps its km
     if (lastTrip.mode === 'map' && points.start && points.end) $('calcMapBtn').click();
     else renderResult();
   }
@@ -204,7 +209,7 @@ function renderResult() {
 // ---------- Route choices (map trips) ----------
 // Every route found, with its km, time and fare; the rider taps the road they will really take,
 // or drags a ✚ pin onto another road ("your own road", one more option)
-const ROUTE_COLORS = ['#1a73e8', '#8e24aa', '#00897b'];  // route 1, 2, 3 (also the dots in the list)
+const ROUTE_COLORS = ['#1a73e8', '#8e24aa', '#00897b', '#6d4c41', '#3949ab', '#c2185b']; // route 1, 2, 3… (also the list dots)
 const OWN_ROAD_COLOR = '#ef6c00';
 let viaPoint = null; // the ✚ pin
 
@@ -251,6 +256,14 @@ function renderRouteChoices() {
   $('routeExpresswayLegend').classList.toggle('hidden', !routes.some((r) => usesExpressway(r, currentVehicle)));
   $('ownRoadBtn').textContent = viaPoint ? '✚ Drag the ✚ pin on the map onto your road' : '➕ Choose my own road';
   $('ownRoadBtn').disabled = !!viaPoint;
+}
+
+// Expressway routes first, then the roads without it; the same road found twice is listed once
+function mergeRoutes(withExpressway, without) {
+  const same = (a, b) => Math.abs(a.km - b.km) < 0.05 && Math.abs(a.mins - b.mins) <= 1;
+  const out = [...withExpressway];
+  without.forEach((r) => { if (!out.some((x) => same(x, r))) out.push({ ...r, expressway: false }); });
+  return out.slice(0, ROUTE_COLORS.length);
 }
 
 function drawTripRoutes() {
@@ -536,6 +549,11 @@ $('calcMapBtn').addEventListener('click', async () => {
     const opts = routeOptions(currentVehicle);
     const r = await provider.route(points.start, points.end, opts);
     if (r.km < 0.01) throw new Error('start and end are the same place.');
+    // Expressway ticked (vehicle types allowed on it): also the routes without the expressway, to choose from
+    if (!opts.avoidExpressways) {
+      const plain = await provider.route(points.start, points.end, { ...opts, avoidExpressways: true }).catch(() => null);
+      if (plain) r.options = mergeRoutes(r.options || [r], plain.options || [plain]);
+    }
     provider.fit([points.start, points.end]);
     mapError();
     showResult(r.km, `Approx. travel time: ${r.mins} min  •  ${routeNote(r, opts)}`, {

@@ -77,7 +77,7 @@ async function passengerEstimate() {
   const routes = Object.fromEntries(keys.map((k) => [k, byRule[JSON.stringify(routeOptions(k))]]));
   const main = routes[appConfig.defaultVehicle];
   if (main.km < 0.01) throw new Error('start and end are the same place.');
-  provider.drawRoute(main.path); // the tuk-tuk route on the map
+  provider.drawRoute(main.path); // the main vehicle type's route on the map
   provider.fit([points.start, points.end]);
   mapError();
   showEstimates(routes);
@@ -124,7 +124,7 @@ function renderEstimates() {
   const entered = list[0].route.entered;
   $('estimateTrip').textContent = TRIP_TYPES[tripType].name + '  •  ' + (entered ? `Distance entered: ${list[0].route.km} km`
     : 'Shortest route for each vehicle type' +
-      ($('useExpressway').checked ? ' (cars may use the expressway; tuk-tuks and bikes never)' : ' (no expressways)')) +
+      ($('useExpressway').checked ? ` (expressway allowed; never for ${noExpresswayNames()})` : ' (no expressways)')) +
     (waitMins ? `  •  ${formatWaiting(waitMins)} waiting` : '');
   $('estimateFrom').textContent = entered ? '' : 'From: ' + (pointLabels.start || '-');
   $('estimateTo').textContent = entered ? '' : 'To: ' + (pointLabels.end || '-');

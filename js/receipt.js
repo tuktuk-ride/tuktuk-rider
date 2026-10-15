@@ -11,10 +11,13 @@ function pdfSafe(str) {
     .trim();
 }
 
-// e.g. CAR-20261011-184614: vehicle type (first 3 letters) + date + time
+// e.g. CAR-20261011-184614 / MCA-…: vehicle type code + date + time
 function receiptNumber(d, vehicleName) {
   const p = (n) => String(n).padStart(2, '0');
-  const code = String(vehicleName || '').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'TR';
+  // one word: its first 3 letters (TUK, CAR, VAN); more words: their initials + the rest of the last word (MCA, MVA, MBU)
+  const words = String(vehicleName || '').replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  const code = (words.length > 1 ? words.map((w) => w[0]).join('') + words[words.length - 1].slice(1) : words.join(''))
+    .slice(0, 3).toUpperCase() || 'TR';
   return `${code}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 

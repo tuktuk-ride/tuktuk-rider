@@ -1,5 +1,8 @@
 // Admin "Cost per km" tab: works out what one km costs to run (the trip expenses, no profit).
 //   expenses per km = fuel + servicing + tyres + repairs + depreciation + fixed costs (+ driver income)
+// Repairs & wear and depreciation can be typed as one figure, or worked out in their "🧮 Work it out" boxes
+// (like the Excel sheets): repairs = wear parts (cost ÷ km it lasts) + allowance %, depreciation =
+// (value now − selling price later) ÷ (years × km per year). "Use Rs X" copies the result into the field.
 // "Use as my expenses per km" puts the result in Settings → Fare rates, where the profit margins turn it into the
 // one way / empty return / round trip prices (tripPerKm in js/settings.js).
 // Default figures per vehicle type come from config.json. Each vehicle type keeps its own figures on this phone;
@@ -28,19 +31,29 @@ const CostCalc = (() => {
     { id: 'serviceKm', label: 'Km between services' },
     { id: 'tyreCost', label: 'Tyre set cost' },
     { id: 'tyreKm', label: 'Km a tyre set lasts' },
-    { id: 'repairsPerKm', label: 'Repairs & wear (per km)', note: 'Brake pads, battery, clutch, etc.' },
-    { id: 'depreciationPerKm', label: 'Depreciation (per km)', note: 'Loss of vehicle value with mileage' },
+    { id: 'repairsPerKm', label: 'Repairs & wear (per km)', note: 'Brake pads, battery, clutch, etc. Type one figure, or work it out below' },
+    { id: 'depreciationPerKm', label: 'Depreciation (per km)', note: 'Loss of vehicle value with mileage. Type one figure, or work it out below' },
     { id: 'yearlyFixed', label: 'Yearly fixed costs', note: 'Insurance, licence, emission test, lease' },
     { id: 'kmPerYear', label: 'Km driven per year' },
     { id: 'driverMonthly', label: 'Driver income target (per month)', note: 'Optional. 0 = not included' }
   ];
+  // "Work it out" boxes. Depreciation uses "Km driven per year" from 1. Vehicle costs; only when that is 0
+  // does its own "Km per year" field show (depKmPerYear)
+  const REPAIR_FIELDS = [{ id: 'repairAllowancePct', label: 'Allowance for unexpected repairs (%)', note: 'Suggested 10–20%' }];
+  const DEP_FIELDS = [
+    { id: 'depValueNow', label: 'Vehicle value now', note: "What you paid, or today's market value" },
+    { id: 'depSellLater', label: 'Expected selling price later', note: 'Same model, older and higher mileage, on riyasewana.lk / ikman.lk' },
+    { id: 'depYears', label: 'Years you plan to keep it' },
+    { id: 'depKmPerYear', label: 'Km per year', note: '"Km driven per year" in 1. Vehicle costs is 0, so enter the km per year here' }
+  ];
   const TRIP_FIELDS = [{ id: 'tripKm', label: 'Trip distance (km, one way)' }];
-  const ALL_FIELDS = COST_FIELDS.concat(TRIP_FIELDS);
+  const ALL_FIELDS = COST_FIELDS.concat(REPAIR_FIELDS, DEP_FIELDS, TRIP_FIELDS);
   const fid = (id) => 'cc_' + id; // input ids, kept apart from the Settings form ids
 
   let store = { vehicle: '', figures: {} };
   let hooks = { getCurrent: () => null, onUseExpense: () => {}, openFareTab: () => {} };
   let lastExpense = 0;
+  let lastRepairs = 0, lastDepreciation = 0; // "Work it out" results
   let defaultsLoaded = false; // "Defaults" pressed and not saved yet
 
   const s = () => loadSettings();
@@ -63,7 +76,8 @@ const CostCalc = (() => {
   function isDirty() {
     if (!el('cc_fuelPrice')) return false;
     const form = readFigures(), saved = figuresFor(store.vehicle);
-    return ALL_FIELDS.some((f) => form[f.id] !== Number(saved[f.id] ?? 0));
+    return ALL_FIELDS.some((f) => form[f.id] !== Number(saved[f.id] ?? 0)) ||
+      JSON.stringify(form.repairParts) !== JSON.stringify(cleanParts(saved.repairParts));
   }
 
   function saveFigures() {
@@ -99,8 +113,79 @@ const CostCalc = (() => {
       el(containerId).appendChild(wrap);
     });
   }
-  const readFigures = () => Object.fromEntries(ALL_FIELDS.map((f) => [f.id, Math.max(0, parseFloat(el(fid(f.id)).value) || 0)]));
-  const fillFigures = (fig) => ALL_FIELDS.forEach((f) => (el(fid(f.id)).value = fig[f.id] ?? 0));
+  const readFigures = () => ({
+    ...Object.fromEntries(ALL_FIELDS.map((f) => [f.id, Math.max(0, parseFloat(el(fid(f.id)).value) || 0)])),
+    repairParts: readParts()
+  });
+  const fillFigures = (fig) => {
+    ALL_FIELDS.forEach((f) => (el(fid(f.id)).value = fig[f.id] ?? 0));
+    fillParts(fig.repairParts);
+  };
+
+  // ---------- Wear parts list (repairs & wear) ----------
+  const num = (v) => Math.max(0, parseFloat(v) || 0);
+  const cleanParts = (parts) => (Array.isArray(parts) ? parts : []).map((p) => ({ name: String(p.name || '').trim(), cost: num(p.cost), km: num(p.km) }));
+  function addPartRow(p = {}) {
+    const r = document.createElement('div');
+    r.className = 'part-row';
+    r.innerHTML = '<input type="text" class="p-name" maxlength="40" placeholder="Part" aria-label="Part">' +
+      '<input type="number" class="p-cost" inputmode="decimal" min="0" step="any" placeholder="Rs." aria-label="Cost incl. labour (Rs.)">' +
+      '<input type="number" class="p-km" inputmode="decimal" min="0" step="any" placeholder="km" aria-label="Lasts (km)">' +
+      '<button type="button" class="p-del" title="Remove this part" aria-label="Remove this part">✕</button>';
+    r.querySelector('.p-name').value = p.name || '';
+    r.querySelector('.p-cost').value = p.cost ?? '';
+    r.querySelector('.p-km').value = p.km ?? '';
+    r.querySelector('.p-del').addEventListener('click', () => { r.remove(); render(); });
+    el('ccParts').appendChild(r);
+  }
+  const readParts = () => [...document.querySelectorAll('#ccParts .part-row')].map((r) => ({
+    name: r.querySelector('.p-name').value.trim(), cost: num(r.querySelector('.p-cost').value), km: num(r.querySelector('.p-km').value)
+  }));
+  function fillParts(parts) {
+    el('ccParts').innerHTML = '';
+    cleanParts(parts).forEach(addPartRow);
+  }
+
+  // The two "🧮 Work it out" boxes, folded under their fields
+  function buildWorkItOut() {
+    const box = (fieldId, html) => {
+      const d = document.createElement('details');
+      d.className = 'calc-box';
+      d.innerHTML = html;
+      el(fid(fieldId)).parentElement.after(d);
+    };
+    box('repairsPerKm', `<summary>🧮 Work it out <span id="ccRepairSum"></span></summary>
+      <p class="hint">Wear parts only (servicing and tyres have their own lines). Prices are examples: use your garage's quotes.</p>
+      <div class="parts-head"><span>Part</span><span>Cost incl. labour</span><span>Lasts (km)</span><span></span></div>
+      <div id="ccParts"></div>
+      <button type="button" class="btn small secondary" id="ccAddPart">➕ Add part</button>
+      <div id="ccRepairInputs"></div>
+      <table class="breakdown calc-table" id="ccRepairTable"></table>
+      <button type="button" class="btn small" id="ccUseRepair"></button>`);
+    box('depreciationPerKm', `<summary>🧮 Work it out <span id="ccDepSum"></span></summary>
+      <div id="ccDepInputs"></div>
+      <p class="hint dep-km" id="ccDepKmNote"></p>
+      <table class="breakdown calc-table" id="ccDepTable"></table>
+      <button type="button" class="btn small" id="ccUseDep"></button>`);
+    buildInputs(REPAIR_FIELDS, 'ccRepairInputs');
+    buildInputs(DEP_FIELDS, 'ccDepInputs');
+    el('ccAddPart').addEventListener('click', () => { addPartRow({ name: '', cost: '', km: '' }); render(); });
+    el('ccUseRepair').addEventListener('click', () => { el(fid('repairsPerKm')).value = lastRepairs; render(); });
+    el('ccUseDep').addEventListener('click', () => { el(fid('depreciationPerKm')).value = lastDepreciation; render(); });
+  }
+
+  // Results of the two boxes: [table rows, result per km]
+  function workItOut(x) {
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const subtotal = x.repairParts.reduce((sum, p) => sum + (p.km > 0 ? p.cost / p.km : 0), 0);
+    const repairs = round2(subtotal * (1 + x.repairAllowancePct / 100));
+    const loss = Math.max(0, x.depValueNow - x.depSellLater);
+    const fromMain = x.kmPerYear > 0;                     // "Km driven per year" in 1. Vehicle costs
+    const kmYear = fromMain ? x.kmPerYear : x.depKmPerYear; // else the box's own field
+    const totalKm = x.depYears * kmYear;
+    const depreciation = totalKm > 0 ? round2(loss / totalKm) : 0;
+    return { subtotal, repairs, loss, fromMain, kmYear, totalKm, depreciation };
+  }
 
   function row(label, value, note = '', strong = false) {
     const tr = document.createElement('tr');
@@ -124,6 +209,35 @@ const CostCalc = (() => {
     const expense = Math.round(parts.reduce((sum, p) => sum + p[1], 0) * 100) / 100;
     lastExpense = expense;
     showFiguresStatus();
+
+    // "Work it out" boxes
+    const w = workItOut(x);
+    lastRepairs = w.repairs;
+    lastDepreciation = w.depreciation;
+    const rt = el('ccRepairTable');
+    rt.innerHTML = '';
+    rt.appendChild(row('Parts subtotal', money(w.subtotal), 'Each part: cost ÷ km it lasts'));
+    rt.appendChild(row(`Allowance for unexpected repairs (${x.repairAllowancePct}%)`, '+ ' + money(w.subtotal * x.repairAllowancePct / 100)));
+    rt.appendChild(row('Repairs & wear per km', money(w.repairs), '', true));
+    const dt = el('ccDepTable');
+    dt.innerHTML = '';
+    dt.appendChild(row('Loss in value (now − later)', money(w.loss)));
+    dt.appendChild(row(`Km before selling (${x.depYears} years × ${w.kmYear.toLocaleString('en-LK')} km)`, `${w.totalKm.toLocaleString('en-LK')} km`));
+    // km per year: from 1. Vehicle costs, or (when that is 0) the box's own field
+    el(fid('depKmPerYear')).parentElement.classList.toggle('hidden', w.fromMain);
+    el('ccDepKmNote').textContent = w.fromMain
+      ? `Km per year: ${w.kmYear.toLocaleString('en-LK')} — from 1. Vehicle costs → Km driven per year`
+      : (w.kmYear > 0 ? '' : 'Enter the km per year above to work out depreciation.');
+    dt.appendChild(row('Depreciation per km', money(w.depreciation), '', true));
+    const useBtn = (id, value, field, what) => {
+      const inUse = Math.abs(x[field] - value) < 0.005;
+      el(id).textContent = inUse ? `✓ ${money(value)} is in the ${what} field` : `⬆ Use ${money(value)} as ${what} per km`;
+      el(id).disabled = inUse || !(value > 0);
+    };
+    useBtn('ccUseRepair', w.repairs, 'repairsPerKm', 'repairs & wear');
+    useBtn('ccUseDep', w.depreciation, 'depreciationPerKm', 'depreciation');
+    el('ccRepairSum').textContent = `— ${money(w.repairs)} per km`;
+    el('ccDepSum').textContent = `— ${money(w.depreciation)} per km`;
 
     const rate = el('ccRateTable');
     rate.innerHTML = '';
@@ -194,6 +308,7 @@ const CostCalc = (() => {
         el('ccVehicle').appendChild(opt);
       });
       buildInputs(COST_FIELDS, 'ccCostInputs');
+      buildWorkItOut();
       buildInputs(TRIP_FIELDS, 'ccTripInputs');
       el('costPanel').addEventListener('input', (e) => { if (e.target.id !== 'ccVehicle') render(); });
 
