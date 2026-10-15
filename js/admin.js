@@ -214,7 +214,7 @@ function fillForm() {
   const radio = document.querySelector(`input[name="mapProvider"][value="${s.mapProvider}"]`) ||
                 document.querySelector('input[name="mapProvider"][value="osm"]');
   radio.checked = true;
-  const enabled = (s.enabledVehicles || []).length ? s.enabledVehicles : [appConfig.defaultVehicle];
+  const enabled = Array.isArray(s.enabledVehicles) && s.enabledVehicles.length ? s.enabledVehicles : vehicleKeys(); // default: all
   vehicleKeys().forEach((key) => {
     $(`vt_${key}`).checked = enabled.includes(key);
     $(`vno_${key}`).value = (s.vehicleNumbers || {})[key] || '';

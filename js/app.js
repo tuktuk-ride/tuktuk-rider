@@ -91,9 +91,11 @@ function routeNote(r, opts, how = 'suggested') {
   return `${kind} (no expressway needed)`;
 }
 
-// Types ticked in Admin, in config.json order (at least the main type)
+// Types ticked in Admin, in config.json order (every type until Admin is saved; at least the main type)
 function enabledVehicles() {
-  const ticked = Object.keys(appConfig.vehicles).filter((k) => (adminSettings.enabledVehicles || []).includes(k));
+  const all = Object.keys(appConfig.vehicles);
+  if (!Array.isArray(adminSettings.enabledVehicles)) return all;
+  const ticked = all.filter((k) => adminSettings.enabledVehicles.includes(k));
   return ticked.length ? ticked : [appConfig.defaultVehicle];
 }
 

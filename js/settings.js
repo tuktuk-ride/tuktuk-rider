@@ -18,7 +18,7 @@ const RATE_DEFAULTS = {
 };
 
 const DEFAULT_SETTINGS = {
-  enabledVehicles: ['tuktuk'], // vehicle types offered on the fare page (ticked in Admin)
+  enabledVehicles: null,       // vehicle types offered on the fare page (ticked in Admin); null = all of config.json
   selectedVehicle: 'tuktuk',   // vehicle type last chosen on the fare page
   currency: 'Rs.',
   mapProvider: 'osm',   // 'osm' = OpenStreetMap (free) | 'google' = Google Maps (needs API key)
