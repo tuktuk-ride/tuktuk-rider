@@ -25,6 +25,8 @@ const DEFAULT_SETTINGS = {
   googleApiKey: '',     // Google Maps API key (Maps JavaScript API + Places API (New) + Routes API)
   adminPin: '1234',
   driverName: '',       // shown on PDF receipts
+  receiptTitle: '',     // business name at the top of PDF receipts ('' = "TukTuk Rider")
+  receiptSubtitle: '',  // optional second line under it (address, slogan, registration no.)
   localOverrides: {},   // figures changed in Admin on this phone, per vehicle type; they win over the API,
                         // e.g. { car: { expensePerKm: 48, oneWayProfitPct: 40 } }. Unchanged figures follow the API.
   vehicleNumbers: {},   // number plate per vehicle type, shown on that type's receipts, e.g. { tuktuk: 'WP ABC-1234' }

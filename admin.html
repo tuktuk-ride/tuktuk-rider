@@ -90,6 +90,15 @@
         <h2>Receipt details</h2>
         <p class="hint">Shown at the top of the PDF receipt sent to passengers. Leave empty to hide.
           Each vehicle type's number plate is set in its Fare rates tab.</p>
+        <label for="receiptTitle">Business name (top of the receipt)</label>
+        <input type="text" id="receiptTitle" maxlength="40" placeholder="e.g. Sunil Cabs" autocomplete="organization">
+        <p class="hint">Empty = "TukTuk Rider".</p>
+
+        <label for="receiptSubtitle">Second line (optional)</label>
+        <input type="text" id="receiptSubtitle" maxlength="60" placeholder="e.g. No. 12, Galle Road, Elpitiya">
+        <p class="error hidden" id="receiptTextWarn">Receipts can print English letters, numbers and symbols only:
+          Sinhala or Tamil letters will be left out.</p>
+
         <label for="driverName">Driver name</label>
         <input type="text" id="driverName" placeholder="e.g. Sunil Perera">
 

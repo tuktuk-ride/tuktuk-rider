@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Settings shared by all vehicle types
-const SHARED_FIELDS = ['currency', 'googleApiKey', 'adminPin', 'driverName', 'driverPhone'];
+const SHARED_FIELDS = ['currency', 'googleApiKey', 'adminPin', 'driverName', 'driverPhone', 'receiptTitle', 'receiptSubtitle'];
 
 // Figures each vehicle type has. Their default is the value in the online rates file (that type's block),
 // else the default; any of them can be changed on this phone (saved in settings.localOverrides).
@@ -222,6 +222,7 @@ function fillForm() {
   });
   renderFareTabs();
   updateMapBox();
+  checkReceiptText();
 }
 
 // Only show the API key field when Google Maps is selected
@@ -325,6 +326,13 @@ const onFormEdit = (e) => {
   if (key) updateLive(key);
 };
 ['input', 'change'].forEach((ev) => $('settingsForm').addEventListener(ev, onFormEdit));
+
+// Receipt header: PDF receipts print English letters, numbers and symbols only
+function checkReceiptText() {
+  const bad = ['receiptTitle', 'receiptSubtitle'].some((id) => /[^ -~]/.test($(id).value));
+  $('receiptTextWarn').classList.toggle('hidden', !bad);
+}
+['receiptTitle', 'receiptSubtitle'].forEach((id) => ['input', 'change'].forEach((ev) => $(id).addEventListener(ev, checkReceiptText)));
 
 // ---------- Save ----------
 const VALIDATION = [

@@ -38,6 +38,14 @@ function createReceiptPdf(trip, s = loadSettings()) {
       if (draw) doc.text(pdfSafe(str), W / 2, y, { align: 'center' });
       y += size * 0.45;
     };
+    // centred text that wraps onto more lines when it is too wide (business name, second line)
+    const centerWrap = (str, size, bold) => {
+      font(size, bold);
+      doc.splitTextToSize(pdfSafe(str), W - 2 * M).forEach((ln) => {
+        if (draw) doc.text(ln, W / 2, y, { align: 'center' });
+        y += size * 0.45;
+      });
+    };
     const divider = () => {
       y += 1;
       if (draw) {
@@ -68,8 +76,10 @@ function createReceiptPdf(trip, s = loadSettings()) {
       y += lines.length * 4 + 1.5;
     };
 
-    // Header
-    center('TukTuk Rider', 16, true);
+    // Header: the rider's business name (Admin → Receipt details), else "TukTuk Rider"
+    const title = pdfSafe(s.receiptTitle) || 'TukTuk Rider';
+    centerWrap(title, title.length > 20 ? 13 : 16, true);
+    if (pdfSafe(s.receiptSubtitle)) centerWrap(s.receiptSubtitle, 8, false);
     y += 1;
     center('TRIP RECEIPT', 9, false);
     if (s.driverName) center(`Driver: ${s.driverName}`, 8, false);
