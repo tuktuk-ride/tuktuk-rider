@@ -318,11 +318,13 @@ $('loginBtn').addEventListener('click', login);
 $('pinInput').addEventListener('keydown', (e) => e.key === 'Enter' && login());
 
 // ---------- Live updates ----------
-$('settingsForm').addEventListener('input', (e) => {
+// "input" while typing; "change" too (some phone keyboards, autofill and paste only send that one)
+const onFormEdit = (e) => {
   updateMapBox();
   const key = vehicleKeys().find((k) => (e.target.id || '').startsWith(`f_${k}_`));
   if (key) updateLive(key);
-});
+};
+['input', 'change'].forEach((ev) => $('settingsForm').addEventListener(ev, onFormEdit));
 
 // ---------- Save ----------
 const VALIDATION = [

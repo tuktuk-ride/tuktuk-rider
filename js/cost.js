@@ -229,8 +229,9 @@ const CostCalc = (() => {
     buildInputs(REPAIR_FIELDS, 'ccRepairInputs');
     buildInputs(DEP_FIELDS, 'ccDepInputs');
     el('ccAddPart').addEventListener('click', () => { addPartRow({ name: '', cost: '', km: '' }); render(); });
-    el('ccUseRepair').addEventListener('click', () => { el(fid('repairsPerKm')).value = lastRepairs; render(); });
-    el('ccUseDep').addEventListener('click', () => { el(fid('depreciationPerKm')).value = lastDepreciation; render(); });
+    // "Use": work the result out again from the figures as they are now (never an older result)
+    el('ccUseRepair').addEventListener('click', () => { el(fid('repairsPerKm')).value = workItOut(readFigures()).repairs; render(); });
+    el('ccUseDep').addEventListener('click', () => { el(fid('depreciationPerKm')).value = workItOut(readFigures()).depreciation; render(); });
   }
 
   // Results of the two boxes: [table rows, result per km]
@@ -371,7 +372,10 @@ const CostCalc = (() => {
       buildFuelType();
       buildWorkItOut();
       buildInputs(TRIP_FIELDS, 'ccTripInputs');
-      el('costPanel').addEventListener('input', (e) => { if (e.target.id !== 'ccVehicle' && e.target.id !== 'cc_fuelType') render(); });
+      // "input" while typing; "change" too, as some phone keyboards, autofill and paste only send that one
+      ['input', 'change'].forEach((ev) => el('costPanel').addEventListener(ev, (e) => {
+        if (e.target.id !== 'ccVehicle' && e.target.id !== 'cc_fuelType') render();
+      }));
 
       el('ccVehicle').addEventListener('change', () => {
         const next = el('ccVehicle').value;

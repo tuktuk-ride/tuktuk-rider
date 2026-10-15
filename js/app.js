@@ -350,12 +350,12 @@ $('calcMeterBtn').addEventListener('click', async () => {
 });
 
 // Readings changed: old fare/receipt no longer valid
-['startMeter', 'endMeter'].forEach((id) => $(id).addEventListener('input', hideResult));
+['startMeter', 'endMeter'].forEach((id) => ['input', 'change'].forEach((ev) => $(id).addEventListener(ev, hideResult)));
 
 // Waiting time changed: update the shown fare straight away
-['waitHours', 'waitMinutes'].forEach((id) => $(id).addEventListener('input', () => {
+['waitHours', 'waitMinutes'].forEach((id) => ['input', 'change'].forEach((ev) => $(id).addEventListener(ev, () => {
   if (lastTrip && !$('resultCard').classList.contains('hidden')) renderResult();
-}));
+})));
 
 function clearWaiting() {
   $('waitHours').value = '';
@@ -390,7 +390,7 @@ $('calcDistanceBtn').addEventListener('click', async () => {
 });
 
 // Distance changed: old fare/receipt no longer valid
-$('distanceKm').addEventListener('input', hideResult);
+['input', 'change'].forEach((ev) => $('distanceKm').addEventListener(ev, hideResult));
 $('distanceKm').addEventListener('keydown', (e) => e.key === 'Enter' && $('calcDistanceBtn').click());
 
 $('clearDistanceBtn').addEventListener('click', () => {

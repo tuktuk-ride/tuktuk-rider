@@ -182,8 +182,8 @@ $('shareEstimateBtn').addEventListener('click', async () => {
 });
 
 // Expected waiting changed: update the estimates on screen
-['waitHours', 'waitMinutes'].forEach((id) => $(id).addEventListener('input', () => {
+['waitHours', 'waitMinutes'].forEach((id) => ['input', 'change'].forEach((ev) => $(id).addEventListener(ev, () => {
   if (isPassenger() && !$('estimateCard').classList.contains('hidden')) renderEstimates();
-}));
+})));
 
 applyMode();
