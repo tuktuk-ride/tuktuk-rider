@@ -80,6 +80,8 @@ function resetSettings() {
 //   "fare":    { "minimumFare": 150, "expensePerKm": 33.85, "roundUpKm": false, "roundMode": "down", "roundTo": 10 }
 //   "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 }
 // and the profit margins, the same for every vehicle type:  "profit": { "oneWayPct": 50, "roundTripPct": 15 }
+// and today's fuel prices (Rs. per litre), for the Cost per km tab:
+//   "fuelPrices": { "effectiveDate": "2026-09-30", "petrol92": 414, "petrol95": 475, "autoDiesel": 392, "superDiesel": 528 }
 // Online rates file: { "schemaVersion": 2, "updatedAt": "2026-10-15", "profit": { ... },
 //                      "vehicles": { "tuktuk": { "active": true, ... } } }
 //   "active": true is required, plus fare.minimumFare and fare.expensePerKm; otherwise that type uses this phone's rates.
@@ -118,6 +120,29 @@ function readProfit(block, limits = {}) {
     if (numberOk((n) => n >= 0)(v) && !(range && (v < range[0] || v > range[1]))) rates[setting] = v;
   });
   return rates;
+}
+
+// Fuel prices ("fuelPrices" block of config.json / the online file): { petrol92: 414, ..., effectiveDate: '2026-09-30' }.
+// Only the fuel types listed in config.json "fuelTypes", within limits.fuelPrice.
+function readFuelPrices(block, cfg) {
+  const out = {};
+  if (!isObject(block)) return out;
+  const range = (cfg.limits || {}).fuelPrice;
+  Object.keys(cfg.fuelTypes || {}).forEach((t) => {
+    let v = block[t];
+    if (typeof v === 'string' && v.trim() !== '' && !isNaN(v)) v = Number(v);
+    if (numberOk((n) => n > 0)(v) && !(range && (v < range[0] || v > range[1]))) out[t] = v;
+  });
+  if (typeof block.effectiveDate === 'string') out.effectiveDate = block.effectiveDate;
+  return out;
+}
+
+// Price of a fuel type: { price, source: 'rates' | 'default', effectiveDate } (online file first, else config.json)
+function fuelPriceFor(type, cfg, rateSet) {
+  const online = (rateSet && rateSet.fuelPrices) || {};
+  if (online[type] > 0) return { price: online[type], source: 'rates', effectiveDate: online.effectiveDate || '' };
+  const def = readFuelPrices(cfg.fuelPrices, cfg);
+  return def[type] > 0 ? { price: def[type], source: 'default', effectiveDate: def.effectiveDate || '' } : null;
 }
 
 // Settings from one vehicle block of config.json / the online file. Invalid or out-of-limits values are left out.
@@ -178,6 +203,7 @@ function parseRateFile(data, cfg) {
       if (isObject(block)) vehicles[key.toLowerCase()] = parseOnlineBlock(block, cfg.limits || {});
     });
     return { format: 2, main: null, vehicles, profit: readProfit(data.profit, (cfg.limits || {}).profit),
+      fuelPrices: readFuelPrices(data.fuelPrices, cfg),
       updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '' };
   }
   const byName = Object.fromEntries(Object.entries(data).filter(([, b]) => isObject(b)).map(([n, b]) => [n.toUpperCase(), b]));
@@ -185,7 +211,7 @@ function parseRateFile(data, cfg) {
     const block = byName[legacyBlockName(key)];
     if (block) vehicles[key] = parseRateBlock(block);
   });
-  return { format: 1, main: parseRateBlock(data), vehicles, profit: {}, updatedAt: '' };
+  return { format: 1, main: parseRateBlock(data), vehicles, profit: {}, fuelPrices: {}, updatedAt: '' };
 }
 
 // Last good online file kept on this phone, if not older than config.json "ratesCacheDays"
@@ -217,7 +243,7 @@ async function fetchOnlineRateSet() {
     try { localStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data })); } catch (e) { /* storage blocked */ }
     return { ...set, reachable: true };
   } catch (e) {
-    return cachedRateSet(cfg) || { format: 0, main: null, vehicles: {}, profit: {}, updatedAt: '', reachable: false };
+    return cachedRateSet(cfg) || { format: 0, main: null, vehicles: {}, profit: {}, fuelPrices: {}, updatedAt: '', reachable: false };
   } finally {
     clearTimeout(timer);
   }

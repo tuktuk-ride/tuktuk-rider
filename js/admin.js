@@ -310,7 +310,8 @@ async function login() {
   CostCalc.init({
     getCurrent: costInfo,
     onUseExpense: useExpense,
-    openFareTab: showFareTab
+    openFareTab: showFareTab,
+    getRateSet: () => rateSet // fuel prices of the online rates file
   });
 }
 $('loginBtn').addEventListener('click', login);

@@ -1,5 +1,7 @@
 // Admin "Cost per km" tab: works out what one km costs to run (the trip expenses, no profit).
 //   expenses per km = fuel + servicing + tyres + repairs + depreciation + fixed costs (+ driver income)
+// Fuel type: its price comes from the online rates file ("fuelPrices"), else config.json; a typed price is the
+// rider's own (with "↩ Use Rs X" to go back to the rates file price).
 // Repairs & wear and depreciation can be typed as one figure, or worked out in their "🧮 Work it out" boxes
 // (like the Excel sheets): repairs = wear parts (cost ÷ km it lasts) + allowance %, depreciation =
 // (value now − selling price later) ÷ (years × km per year). "Use Rs X" copies the result into the field.
@@ -7,7 +9,8 @@
 // one way / empty return / round trip prices (tripPerKm in js/settings.js).
 // Default figures per vehicle type come from config.json. Each vehicle type keeps its own figures on this phone;
 // changes calculate straight away but are only kept when "Save vehicle costs" is pressed.
-// Used by admin.js:  CostCalc.init({ getCurrent(vehicle), onUseExpense(expensePerKm, vehicle), openFareTab(vehicle) })
+// Used by admin.js:  CostCalc.init({ getCurrent(vehicle), onUseExpense(expensePerKm, vehicle), openFareTab(vehicle),
+//                                   getRateSet() })
 //                    and CostCalc.refresh()
 const CostCalc = (() => {
   const el = (id) => document.getElementById(id);
@@ -16,16 +19,18 @@ const CostCalc = (() => {
   // Vehicle types and their default figures, loaded from config.json
   let VEHICLES = {};
   let defaultVehicle = 'tuktuk';
+  let CFG = { fuelTypes: {} };
 
   async function loadConfig() {
     const cfg = await loadAppConfig();
+    CFG = cfg;
     VEHICLES = Object.fromEntries(Object.entries(cfg.vehicles).filter(([, v]) => v.costDefaults));
     if (!Object.keys(VEHICLES).length) throw new Error('no cost figures in config.json');
     defaultVehicle = VEHICLES[cfg.defaultVehicle] ? cfg.defaultVehicle : Object.keys(VEHICLES)[0];
   }
 
   const COST_FIELDS = [
-    { id: 'fuelPrice', label: 'Fuel price (per litre)' },
+    { id: 'fuelPrice', label: 'Fuel price (per litre)' }, // the "Fuel type" dropdown goes above it
     { id: 'kmPerLitre', label: 'Fuel efficiency (km per litre)' },
     { id: 'serviceCost', label: 'Servicing cost (each service)' },
     { id: 'serviceKm', label: 'Km between services' },
@@ -51,7 +56,7 @@ const CostCalc = (() => {
   const fid = (id) => 'cc_' + id; // input ids, kept apart from the Settings form ids
 
   let store = { vehicle: '', figures: {} };
-  let hooks = { getCurrent: () => null, onUseExpense: () => {}, openFareTab: () => {} };
+  let hooks = { getCurrent: () => null, onUseExpense: () => {}, openFareTab: () => {}, getRateSet: () => ({}) };
   let lastExpense = 0;
   let lastRepairs = 0, lastDepreciation = 0; // "Work it out" results
   let defaultsLoaded = false; // "Defaults" pressed and not saved yet
@@ -70,13 +75,20 @@ const CostCalc = (() => {
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* storage blocked */ }
   }
-  const figuresFor = (v) => ({ ...VEHICLES[v].costDefaults, ...(store.figures[v] || {}) });
+  // Default figures of a vehicle type, with today's price of its fuel type (rates file, else config.json)
+  const defaultsFor = (v) => {
+    const d = { ...VEHICLES[v].costDefaults };
+    const p = fuelPriceFor(d.fuelType, CFG, hooks.getRateSet());
+    if (p) d.fuelPrice = p.price;
+    return d;
+  };
+  const figuresFor = (v) => ({ ...defaultsFor(v), ...(store.figures[v] || {}) });
 
   // Form differs from what is saved for this vehicle type?
   function isDirty() {
     if (!el('cc_fuelPrice')) return false;
     const form = readFigures(), saved = figuresFor(store.vehicle);
-    return ALL_FIELDS.some((f) => form[f.id] !== Number(saved[f.id] ?? 0)) ||
+    return ALL_FIELDS.some((f) => form[f.id] !== Number(saved[f.id] ?? 0)) || form.fuelType !== (saved.fuelType || '') ||
       JSON.stringify(form.repairParts) !== JSON.stringify(cleanParts(saved.repairParts));
   }
 
@@ -115,12 +127,59 @@ const CostCalc = (() => {
   }
   const readFigures = () => ({
     ...Object.fromEntries(ALL_FIELDS.map((f) => [f.id, Math.max(0, parseFloat(el(fid(f.id)).value) || 0)])),
+    fuelType: el('cc_fuelType').value,
     repairParts: readParts()
   });
   const fillFigures = (fig) => {
     ALL_FIELDS.forEach((f) => (el(fid(f.id)).value = fig[f.id] ?? 0));
+    el('cc_fuelType').value = CFG.fuelTypes[fig.fuelType] ? fig.fuelType : Object.keys(CFG.fuelTypes)[0] || '';
     fillParts(fig.repairParts);
   };
+
+  // ---------- Fuel type (price from the rates file) ----------
+  const fuelPrice = (type) => fuelPriceFor(type, CFG, hooks.getRateSet()); // js/settings.js
+  function buildFuelType() {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = '<label for="cc_fuelType">Fuel type</label><select id="cc_fuelType"></select>';
+    Object.entries(CFG.fuelTypes || {}).forEach(([key, t]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = t.name;
+      wrap.querySelector('select').appendChild(opt);
+    });
+    el('ccCostInputs').prepend(wrap);
+    // the price of the chosen fuel, under the fuel price field
+    const note = document.createElement('p');
+    note.className = 'hint fuel-note';
+    note.id = 'ccFuelNote';
+    el(fid('fuelPrice')).after(note);
+    // a new fuel type takes its price
+    el('cc_fuelType').addEventListener('change', () => {
+      const p = fuelPrice(el('cc_fuelType').value);
+      if (p) el(fid('fuelPrice')).value = p.price;
+      render();
+    });
+  }
+  // "From the rates file (effective 30 Sep 2026)" / "Your own price — the rates file has Rs 392 [↩ Use Rs 392]"
+  function showFuelNote(x) {
+    const note = el('ccFuelNote');
+    const p = fuelPrice(x.fuelType);
+    note.innerHTML = '';
+    if (!p) return;
+    const day = p.effectiveDate ? new Date(p.effectiveDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const from = p.source === 'rates' ? 'the rates file' : 'the app defaults';
+    if (Math.abs(x.fuelPrice - p.price) < 0.005) {
+      note.textContent = `From ${from}${day ? ` (effective ${day})` : ''}`;
+      return;
+    }
+    note.append(`Your own price — ${from} has ${money(p.price)}${day ? ` (effective ${day})` : ''} `);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'src-reset';
+    b.textContent = `↩ Use ${money(p.price)}`;
+    b.addEventListener('click', () => { el(fid('fuelPrice')).value = p.price; render(); });
+    note.append(b);
+  }
 
   // ---------- Wear parts list (repairs & wear) ----------
   const num = (v) => Math.max(0, parseFloat(v) || 0);
@@ -209,6 +268,7 @@ const CostCalc = (() => {
     const expense = Math.round(parts.reduce((sum, p) => sum + p[1], 0) * 100) / 100;
     lastExpense = expense;
     showFiguresStatus();
+    showFuelNote(x);
 
     // "Work it out" boxes
     const w = workItOut(x);
@@ -308,9 +368,10 @@ const CostCalc = (() => {
         el('ccVehicle').appendChild(opt);
       });
       buildInputs(COST_FIELDS, 'ccCostInputs');
+      buildFuelType();
       buildWorkItOut();
       buildInputs(TRIP_FIELDS, 'ccTripInputs');
-      el('costPanel').addEventListener('input', (e) => { if (e.target.id !== 'ccVehicle') render(); });
+      el('costPanel').addEventListener('input', (e) => { if (e.target.id !== 'ccVehicle' && e.target.id !== 'cc_fuelType') render(); });
 
       el('ccVehicle').addEventListener('change', () => {
         const next = el('ccVehicle').value;
@@ -331,7 +392,7 @@ const CostCalc = (() => {
       document.querySelectorAll('.cc-defaults').forEach((b) => b.addEventListener('click', () => {
         const name = VEHICLES[store.vehicle].name;
         if (!confirm(`Load the default ${name} figures? Your changes are kept only if you press Save after this.`)) return;
-        fillFigures(VEHICLES[store.vehicle].costDefaults);
+        fillFigures(defaultsFor(store.vehicle));
         defaultsLoaded = true;
         render();
       }));

@@ -5,9 +5,17 @@
   "limits": {
     "fare": { "minimumFare": [0, 5000], "expensePerKm": [1, 500], "roundTo": [1, 100] },
     "profit": { "oneWayPct": [0, 500], "roundTripPct": [0, 500] },
-    "waiting": { "perHour": [0, 3000], "graceMins": [0, 60], "stepMins": [1, 60] }
+    "waiting": { "perHour": [0, 3000], "graceMins": [0, 60], "stepMins": [1, 60] },
+    "fuelPrice": [100, 2000]
   },
   "profit": { "oneWayPct": 50, "roundTripPct": 15 },
+  "fuelTypes": {
+    "petrol92": { "name": "Lanka Petrol 92 Octane" },
+    "petrol95": { "name": "Lanka Petrol 95 Octane" },
+    "autoDiesel": { "name": "Lanka Auto Diesel" },
+    "superDiesel": { "name": "Lanka Super Diesel" }
+  },
+  "fuelPrices": { "effectiveDate": "2026-09-30", "petrol92": 414, "petrol95": 475, "autoDiesel": 392, "superDiesel": 528 },
   "defaultVehicle": "tuktuk",
   "vehicles": {
     "bike": {
@@ -18,6 +26,7 @@
       "fare": { "minimumFare": 100, "expensePerKm": 18.15, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
+        "fuelType": "petrol92",
         "fuelPrice": 414,
         "kmPerLitre": 40,
         "serviceCost": 6000,
@@ -52,6 +61,7 @@
       "fare": { "minimumFare": 150, "expensePerKm": 33.85, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
+        "fuelType": "petrol92",
         "fuelPrice": 414,
         "kmPerLitre": 25,
         "serviceCost": 15000,
@@ -88,6 +98,7 @@
       "fare": { "minimumFare": 300, "expensePerKm": 38.89, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
+        "fuelType": "petrol92",
         "fuelPrice": 414,
         "kmPerLitre": 18,
         "serviceCost": 15000,
@@ -124,6 +135,7 @@
       "fare": { "minimumFare": 400, "expensePerKm": 46.1, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 400, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
+        "fuelType": "petrol92",
         "fuelPrice": 414,
         "kmPerLitre": 15,
         "serviceCost": 20000,
@@ -161,6 +173,7 @@
       "fare": { "minimumFare": 500, "expensePerKm": 52.99, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 400, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
+        "fuelType": "petrol92",
         "fuelPrice": 414,
         "kmPerLitre": 12,
         "serviceCost": 18000,
@@ -194,10 +207,11 @@
       "icon": "🚐",
       "avoidExpressways": false,
       "routePreference": "main",
-      "fare": { "minimumFare": 1000, "expensePerKm": 78, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
+      "fare": { "minimumFare": 1000, "expensePerKm": 75.56, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 600, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
-        "fuelPrice": 414,
+        "fuelType": "autoDiesel",
+        "fuelPrice": 392,
         "kmPerLitre": 9,
         "serviceCost": 25000,
         "serviceKm": 5000,
@@ -231,10 +245,11 @@
       "icon": "🚌",
       "avoidExpressways": false,
       "routePreference": "main",
-      "fare": { "minimumFare": 2500, "expensePerKm": 121.77, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
+      "fare": { "minimumFare": 2500, "expensePerKm": 118.1, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 1000, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
-        "fuelPrice": 414,
+        "fuelType": "autoDiesel",
+        "fuelPrice": 392,
         "kmPerLitre": 6,
         "serviceCost": 40000,
         "serviceKm": 5000,
