@@ -62,7 +62,7 @@
           <label for="currency">Currency label</label>
           <input type="text" id="currency" maxlength="6" required>
         </div>
-        <button class="btn secondary" type="button" data-goto="costPanel">🧮 Work out the real cost per km</button>
+        <button class="btn secondary" type="button" data-goto="costPanel">🧮 Work out my expenses per km</button>
       </section>
 
       <section class="card">
@@ -111,8 +111,8 @@
     <div id="costPanel" class="hidden">
       <section class="card">
         <p class="hint" style="margin-top:0">
-          Work out what a km really costs to run the vehicle, and what to charge per km.
-          Enter your own figures; everything else calculates automatically.
+          Work out what a km really costs to run the vehicle (fuel, service, tyres…), with your own figures.
+          Your profit margins are set in Settings → Fare rates.
         </p>
         <label for="ccVehicle">Vehicle type</label>
         <select id="ccVehicle"></select>
@@ -131,43 +131,23 @@
       </section>
 
       <section class="card">
-        <h2>2. Rate per km</h2>
+        <h2>2. Expenses per km</h2>
         <table class="breakdown calc-table" id="ccRateTable"></table>
         <div class="charge-box">
-          <div class="hint">CHARGE PER KM</div>
-          <div class="total" id="ccChargePerKm">-</div>
-          <div class="hint" id="ccChargeHint"></div>
+          <div class="hint">TRIP EXPENSES PER KM (NO PROFIT)</div>
+          <div class="total" id="ccExpense">-</div>
         </div>
-        <div class="row">
-          <div>
-            <label for="ccRoundMode">Round the per km price</label>
-            <select id="ccRoundMode">
-              <option value="nearest">To the nearest</option>
-              <option value="down">Down (floor)</option>
-              <option value="up">Up (ceiling)</option>
-            </select>
-          </div>
-          <div>
-            <label for="ccRoundTo">Rupees</label>
-            <select id="ccRoundTo">
-              <option value="1">Rs. 1</option>
-              <option value="5">Rs. 5</option>
-              <option value="10">Rs. 10</option>
-            </select>
-          </div>
-        </div>
-        <div class="rounded-price">Per km price to use: <b id="ccRounded">-</b></div>
         <div class="notice" id="ccCompare"></div>
-        <button class="btn" id="ccSaveBtn" type="button">💾 Save as the cost per km price</button>
-        <p class="hint" id="ccSaveInfo"></p>
-        <button class="btn small secondary hidden" id="ccOpenFareBtn" type="button">Open the fare rates tab</button>
+        <button class="btn" id="ccUseBtn" type="button">✅ Use as my expenses per km</button>
+        <p class="hint" id="ccPrices"></p>
+        <button class="btn small secondary" id="ccOpenFareBtn" type="button">Open the fare rates</button>
       </section>
 
       <section class="card">
         <h2>3. Test a trip</h2>
         <div id="ccTripInputs"></div>
         <table class="breakdown calc-table" id="ccTripTable"></table>
-        <p class="hint">Total is rounded down to the nearest Rs. 10, the same as the app.</p>
+        <p class="hint">With the expenses above, your profit margins, minimum fare and rounding (Settings). Waiting is added on the fare page.</p>
         <div class="row cost-actions">
           <button class="btn cc-save-figures" type="button">💾 Save vehicle costs</button>
           <button class="btn secondary cc-defaults" type="button">↩ Defaults</button>

@@ -1,5 +1,5 @@
 // Builds a receipt-style PDF (80mm wide, like a thermal slip) with jsPDF.
-// trip = { mode: 'map' | 'meter' | 'distance', vehicleName, from, to, startMeter, endMeter, distanceKm, mins, waitingMins, passenger, date }
+// trip = { mode: 'map' | 'meter' | 'distance', vehicleName, from, to, startMeter, endMeter, distanceKm, mins, waitingMins, tripType, passenger, date }
 
 // jsPDF's built-in font only supports basic Latin characters
 function pdfSafe(str) {
@@ -22,7 +22,7 @@ function createReceiptPdf(trip, s = loadSettings()) {
   const { jsPDF } = window.jspdf;
   const W = 80;        // page width (mm)
   const M = 6;         // side margin
-  const f = calculateFare(trip.distanceKm, s, trip.waitingMins);
+  const f = calculateFare(trip.distanceKm, s, trip.waitingMins, trip.tripType);
   const money = (v) => pdfSafe(formatMoney(v, s));
 
   // Runs twice: first to measure the height, then to actually draw.
@@ -84,6 +84,7 @@ function createReceiptPdf(trip, s = loadSettings()) {
 
     // Trip
     if (trip.vehicleName) row('Vehicle type', trip.vehicleName);
+    row('Trip', TRIP_TYPES[f.tripType].name);
     if (trip.mode === 'map') {
       block('FROM', trip.from);
       block('TO', trip.to);

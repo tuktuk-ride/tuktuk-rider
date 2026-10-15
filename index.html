@@ -56,6 +56,16 @@
       <p class="hint" id="rateSource"></p>
     </div>
 
+    <!-- TRIP TYPE: one way / empty return / round trip (rider and passenger) -->
+    <div class="card trip-card">
+      <div class="trip-types" id="tripTypes">
+        <button type="button" class="trip-type" data-trip="oneway"></button>
+        <button type="button" class="trip-type" data-trip="empty"></button>
+        <button type="button" class="trip-type" data-trip="round"></button>
+      </div>
+      <p class="hint" id="tripTypeInfo"></p>
+    </div>
+
     <div class="tabs">
       <button class="tab active" data-panel="mapPanel">📍 Map</button>
       <button class="tab rider-only" data-panel="meterPanel">🔢 Meter</button>

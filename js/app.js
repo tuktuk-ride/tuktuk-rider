@@ -5,17 +5,43 @@ let currentVehicle = appConfig.defaultVehicle;
 let settings = adminSettings;                        // fare settings of the selected vehicle type
 const $ = (id) => document.getElementById(id);
 
-// ---------- Rates (online file first, admin settings as fallback) ----------
-// " (admin cost calculator price)" while the cost per km price is ticked in Admin
-function priceNote() {
-  return Number(settings.perKmOverride) > 0 ? ' (admin cost calculator price)' : '';
+// ---------- Trip type: one way / empty return / round trip ----------
+const TRIP_KEY = 'tuktuk_trip_type';
+let tripType = 'oneway';
+try { tripType = tripTypeOk(localStorage.getItem(TRIP_KEY)); } catch (e) { /* storage blocked */ }
+
+// The 3 buttons: name + this vehicle's price per km (rider); names only for passengers (every vehicle type)
+function renderTripTypes() {
+  const passenger = typeof isPassenger === 'function' && isPassenger();
+  const prices = tripPrices(settings);
+  document.querySelectorAll('#tripTypes .trip-type').forEach((b) => {
+    const t = b.dataset.trip;
+    b.classList.toggle('active', t === tripType);
+    b.innerHTML = '<b></b><small></small>';
+    b.querySelector('b').textContent = TRIP_TYPES[t].name;
+    b.querySelector('small').textContent = passenger || !(prices[t] > 0) ? '' : `${formatMoney(prices[t], settings)}/km`;
+  });
+  $('tripTypeInfo').textContent = TRIP_TYPES[tripType].info;
 }
 
+document.querySelectorAll('#tripTypes .trip-type').forEach((b) => b.addEventListener('click', () => {
+  tripType = tripTypeOk(b.dataset.trip);
+  try { localStorage.setItem(TRIP_KEY, tripType); } catch (e) { /* storage blocked */ }
+  renderTripTypes();
+  if (typeof isPassenger === 'function' && isPassenger()) {
+    if (!$('estimateCard').classList.contains('hidden')) renderEstimates();
+    return;
+  }
+  showRateInfo($('rateSource').textContent);
+  if (lastTrip && !$('resultCard').classList.contains('hidden')) renderResult();
+}));
+
+// ---------- Rates (online file first, admin settings as fallback) ----------
 function showRateInfo(source) {
+  renderTripTypes();
   $('rateInfo').textContent =
     `Minimum fare: ${formatMoney(settings.minimumFare, settings)}  •  ` +
-    `Per km: ${formatMoney(effectivePerKmRate(settings), settings)}` +
-    priceNote() +
+    `${TRIP_TYPES[tripType].name}: ${formatMoney(tripPerKm(settings, tripType), settings)}/km` +
     (settings.roundUpKm ? '  •  partial km charged as full km' : '') +
     (waitingRate(settings) ? `  •  Waiting: ${formatMoney(waitingRate(settings), settings)}/hour` +
       (waitingRuleText(settings) ? ` (${waitingRuleText(settings)})` : '') : '');
@@ -148,8 +174,10 @@ function renderResult() {
   lastTrip.waitingMins = getWaitingMins();
   lastTrip.vehicleName = (appConfig.vehicles[currentVehicle] || {}).name || currentVehicle;
   lastTrip.plusToll = lastTrip.mode === 'map' && usesExpressway(lastTrip.route, currentVehicle);
-  const f = calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins);
-  $('resultDistance').textContent = `${vehicleLabel(appConfig, currentVehicle)}  •  Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
+  lastTrip.tripType = tripType;
+  const f = calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins, tripType);
+  $('resultDistance').textContent = `${vehicleLabel(appConfig, currentVehicle)}  •  ${TRIP_TYPES[tripType].name}  •  ` +
+    `Distance: ${Number(lastTrip.distanceKm).toFixed(2)} km` +
     (lastTrip.mode === 'distance' ? ' (entered)' : '') +
     (settings.roundUpKm ? ` (charged as ${f.km} km)` : '') +
     (f.waitMins ? `  •  Waiting: ${formatWaiting(f.waitMins)}` : '');
@@ -158,7 +186,7 @@ function renderResult() {
   renderRouteChoices();
 
   $('resultBreakdown').innerHTML = `
-    <tr><td>${f.km.toFixed(2)} km × ${formatMoney(f.perKmRate, settings)}</td>
+    <tr><td>${f.km.toFixed(2)} km × ${formatMoney(f.perKmRate, settings)} (${TRIP_TYPES[f.tripType].name.toLowerCase()})</td>
         <td>${formatMoney(f.kmPart.toFixed(2), settings)}</td></tr>` +
     (f.minimumApplied ? `
     <tr><td>Minimum fare applied</td><td>${formatMoney(f.minimumFare, settings)}</td></tr>` : '') +
@@ -191,7 +219,7 @@ function renderRouteChoices() {
   const list = $('routeChoiceList');
   list.innerHTML = '';
   routes.forEach((r, i) => {
-    const fare = calculateFare(r.km, settings, lastTrip.waitingMins).total;
+    const fare = calculateFare(r.km, settings, lastTrip.waitingMins, tripType).total;
     const tags = routes.length > 1 ? [r.km === minKm ? 'shortest' : '', r.mins === minMins ? 'fastest' : ''].filter(Boolean).join(', ') : '';
     const onExpressway = usesExpressway(r, currentVehicle);
     const item = document.createElement('div');
@@ -556,7 +584,7 @@ $('shareReceiptBtn').addEventListener('click', async () => {
   const r = buildReceipt();
   if (!r) return;
   const file = new File([r.doc.output('blob')], r.fileName, { type: 'application/pdf' });
-  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins).total, settings) +
+  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins, lastTrip.tripType).total, settings) +
     (lastTrip.plusToll ? TOLL_WORDS : '');
 
   if (navigator.canShare && navigator.canShare({ files: [file] })) {

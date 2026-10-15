@@ -5,7 +5,9 @@ const SETTINGS_KEY = 'tuktuk_settings_v1';
 // defaults, the online rates file overrides them and Admin can change them on this phone.
 const RATE_DEFAULTS = {
   minimumFare: 150,     // lowest fare for a trip's distance (Rs.)
-  perKmRate: 65,        // price per km (Rs.)
+  expensePerKm: 33.85,  // what one km costs to run (fuel, service, tyres...), no profit (Rs.)
+  oneWayProfitPct: 50,  // profit on a one way trip and an empty return (%)
+  roundTripProfitPct: 15, // profit on a round trip (%)
   roundUpKm: false,     // true = charge partial km as a full km
   fareRoundMode: 'down', // total rounded 'down' | 'up' | 'nearest'...
   fareRoundTo: 10,      // ...to this many Rs.
@@ -18,24 +20,23 @@ const RATE_DEFAULTS = {
 const DEFAULT_SETTINGS = {
   enabledVehicles: ['tuktuk'], // vehicle types offered on the fare page (ticked in Admin)
   selectedVehicle: 'tuktuk',   // vehicle type last chosen on the fare page
-  perKmCalculated: {},         // per km price saved from the Admin "Cost per km" tab, per type, e.g. { car: 66 }
-  useCalculated: {},           // true = charge that saved price instead of the API/Admin per km price
-                               // (fuel is part of that calculation), e.g. { car: true }
   currency: 'Rs.',
   mapProvider: 'osm',   // 'osm' = OpenStreetMap (free) | 'google' = Google Maps (needs API key)
   googleApiKey: '',     // Google Maps API key (Maps JavaScript API + Places API (New) + Routes API)
   adminPin: '1234',
   driverName: '',       // shown on PDF receipts
   localOverrides: {},   // figures changed in Admin on this phone, per vehicle type; they win over the API,
-                        // e.g. { car: { perKmRate: 120, waitingPerHour: 350 } }. Unchanged figures follow the API.
+                        // e.g. { car: { expensePerKm: 48, oneWayProfitPct: 40 } }. Unchanged figures follow the API.
   vehicleNumbers: {},   // number plate per vehicle type, shown on that type's receipts, e.g. { tuktuk: 'WP ABC-1234' }
   driverPhone: ''
 };
 
 // Settings saved by older versions used "1st km / next km" names: carry them over
-const OLD_NAMES = { firstKmRate: 'minimumFare', nextKmRate: 'perKmRate' };
-// Figures of the fuel adjustment, which was removed (the per km price now comes from the cost per km calculation)
-const REMOVED_FIELDS = ['returnPerKm', 'returnCalculated', 'fuelEnabled', 'fuelPrice', 'baseFuelPrice', 'fuelStep', 'fuelStepChange', 'fuelMinPerKm', 'fuelMaxPerKm',
+const OLD_NAMES = { firstKmRate: 'minimumFare' };
+// Figures of older versions that are no longer used: per km prices (now expenses per km + profit margins),
+// the cost per km price, return empty prices and the fuel adjustment
+const REMOVED_FIELDS = ['perKmRate', 'nextKmRate', 'perKmCalculated', 'useCalculated', 'perKmOverride', 'perKmOverrides',
+  'returnPerKm', 'returnCalculated', 'fuelEnabled', 'fuelPrice', 'baseFuelPrice', 'fuelStep', 'fuelStepChange', 'fuelMinPerKm', 'fuelMaxPerKm',
   'kmPerLiter', 'fuelMinNextKm', 'fuelMaxNextKm'];
 
 function loadSettings() {
@@ -45,20 +46,10 @@ function loadSettings() {
       if (saved[oldName] !== undefined && saved[newName] === undefined) saved[newName] = saved[oldName];
       delete saved[oldName];
     });
-    // Older versions applied cost calculator prices straight away: keep them, ticked
-    const applied = { ...(saved.perKmOverrides || {}) };
-    if (Number(saved.perKmOverride) > 0 && !applied.tuktuk) applied.tuktuk = Number(saved.perKmOverride);
-    Object.entries(applied).forEach(([k, v]) => {
-      if (!(Number(v) > 0)) return;
-      saved.perKmCalculated = { ...(saved.perKmCalculated || {}), [k]: Number(v) };
-      saved.useCalculated = { ...(saved.useCalculated || {}), [k]: true };
-    });
-    delete saved.perKmOverride;
-    delete saved.perKmOverrides;
     // Older versions had one vehicle number for the phone: it becomes the tuktuk's
     if (saved.vehicleNo && !saved.vehicleNumbers) saved.vehicleNumbers = { tuktuk: saved.vehicleNo };
     delete saved.vehicleNo;
-    // Forget fuel adjustment figures, top level and changed on this phone
+    // Forget figures that are no longer used, top level and changed on this phone
     REMOVED_FIELDS.forEach((f) => delete saved[f]);
     Object.entries(saved.localOverrides || {}).forEach(([k, o]) => {
       REMOVED_FIELDS.forEach((f) => delete o[f]);
@@ -86,10 +77,12 @@ function resetSettings() {
 
 // ---------- Rate files (config.json defaults + online rates file) ----------
 // Both files use the same shape per vehicle type (keys as in config.json: "tuktuk", "bike", "car"):
-//   "fare":    { "minimumFare": 150, "perKm": 65, "roundUpKm": false, "roundMode": "down", "roundTo": 10 }
+//   "fare":    { "minimumFare": 150, "expensePerKm": 33.85, "roundUpKm": false, "roundMode": "down", "roundTo": 10 }
 //   "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 }
-// Online rates file: { "schemaVersion": 2, "updatedAt": "2026-10-12", "vehicles": { "tuktuk": { "active": true, ... } } }
-//   "active": true is required, plus fare.minimumFare and fare.perKm; otherwise that type uses this phone's rates.
+// and the profit margins, the same for every vehicle type:  "profit": { "oneWayPct": 50, "roundTripPct": 15 }
+// Online rates file: { "schemaVersion": 2, "updatedAt": "2026-10-15", "profit": { ... },
+//                      "vehicles": { "tuktuk": { "active": true, ... } } }
+//   "active": true is required, plus fare.minimumFare and fare.expensePerKm; otherwise that type uses this phone's rates.
 //   Any other field left out (or null) = this phone decides (config.json default, or changed in Admin).
 //   Values outside config.json "limits" are ignored, so a typo (650 instead of 65) is never charged.
 // The last good copy of the online file is kept on the phone and used for "ratesCacheDays" days
@@ -104,7 +97,7 @@ const isBool = (v) => typeof v === 'boolean';
 // [group, field in the files, setting name, valid?]
 const RATE_MAP = [
   ['fare', 'minimumFare', 'minimumFare', numberOk((n) => n >= 0)],
-  ['fare', 'perKm', 'perKmRate', numberOk((n) => n >= 0)],
+  ['fare', 'expensePerKm', 'expensePerKm', numberOk((n) => n > 0)],
   ['fare', 'roundUpKm', 'roundUpKm', isBool],
   ['fare', 'roundMode', 'fareRoundMode', (v) => ['down', 'up', 'nearest'].includes(v)],
   ['fare', 'roundTo', 'fareRoundTo', numberOk((n) => n > 0)],
@@ -113,6 +106,19 @@ const RATE_MAP = [
   ['waiting', 'graceMins', 'waitingGraceMins', numberOk((n) => n >= 0)],
   ['waiting', 'stepMins', 'waitingStepMins', numberOk((n) => n >= 1)]
 ];
+
+// Profit margins ("profit" block of config.json / the online file), for every vehicle type
+const PROFIT_MAP = [['oneWayPct', 'oneWayProfitPct'], ['roundTripPct', 'roundTripProfitPct']];
+function readProfit(block, limits = {}) {
+  const rates = {};
+  PROFIT_MAP.forEach(([field, setting]) => {
+    let v = (block || {})[field];
+    if (typeof v === 'string' && v.trim() !== '' && !isNaN(v)) v = Number(v);
+    const range = limits[field];
+    if (numberOk((n) => n >= 0)(v) && !(range && (v < range[0] || v > range[1]))) rates[setting] = v;
+  });
+  return rates;
+}
 
 // Settings from one vehicle block of config.json / the online file. Invalid or out-of-limits values are left out.
 function readRateBlock(block, limits = {}) {
@@ -131,7 +137,7 @@ function readRateBlock(block, limits = {}) {
 function parseOnlineBlock(block, limits) {
   if (block.active !== true) return null;
   const rates = readRateBlock(block, limits);
-  return 'minimumFare' in rates && 'perKmRate' in rates ? rates : null;
+  return 'minimumFare' in rates && 'expensePerKm' in rates ? rates : null;
 }
 
 // Older online file: settings overrides from one set of UPPER_CASE fields (top level, or a vehicle block),
@@ -141,7 +147,7 @@ function parseRateBlock(data) {
   const perKm = Number(data.PER_KM);
   if (data.IS_STOPPED !== false) return null;                // stopped (or missing) -> use admin rates
   if (!(minFare >= 0) || !(perKm >= 0)) return null;         // missing / bad numbers -> use admin rates
-  const rates = { minimumFare: minFare, perKmRate: perKm };
+  const rates = { minimumFare: minFare }; // its PER_KM is a price, not expenses: not used
   if (typeof data.ROUND_UP_KM === 'boolean') rates.roundUpKm = data.ROUND_UP_KM;
 
   // Copies API number fields into settings. Only valid numbers are taken; anything else keeps the admin value.
@@ -171,14 +177,15 @@ function parseRateFile(data, cfg) {
     Object.entries(data.vehicles).forEach(([key, block]) => {
       if (isObject(block)) vehicles[key.toLowerCase()] = parseOnlineBlock(block, cfg.limits || {});
     });
-    return { format: 2, main: null, vehicles, updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '' };
+    return { format: 2, main: null, vehicles, profit: readProfit(data.profit, (cfg.limits || {}).profit),
+      updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '' };
   }
   const byName = Object.fromEntries(Object.entries(data).filter(([, b]) => isObject(b)).map(([n, b]) => [n.toUpperCase(), b]));
   Object.keys(cfg.vehicles).forEach((key) => {
     const block = byName[legacyBlockName(key)];
     if (block) vehicles[key] = parseRateBlock(block);
   });
-  return { format: 1, main: parseRateBlock(data), vehicles, updatedAt: '' };
+  return { format: 1, main: parseRateBlock(data), vehicles, profit: {}, updatedAt: '' };
 }
 
 // Last good online file kept on this phone, if not older than config.json "ratesCacheDays"
@@ -210,7 +217,7 @@ async function fetchOnlineRateSet() {
     try { localStorage.setItem(RATES_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data })); } catch (e) { /* storage blocked */ }
     return { ...set, reachable: true };
   } catch (e) {
-    return cachedRateSet(cfg) || { format: 0, main: null, vehicles: {}, updatedAt: '', reachable: false };
+    return cachedRateSet(cfg) || { format: 0, main: null, vehicles: {}, profit: {}, updatedAt: '', reachable: false };
   } finally {
     clearTimeout(timer);
   }
@@ -278,26 +285,43 @@ function legacyRates(admin, key, cfg) {
   }
   const own = (admin.vehicleRates || {})[key] || {};
   return Object.fromEntries(Object.entries({
-    minimumFare: own.minimumFare, perKmRate: own.perKmRate, waitingPerHour: own.waitingPerHour
+    minimumFare: own.minimumFare, waitingPerHour: own.waitingPerHour
   }).filter(([, v]) => v !== undefined));
 }
 
 // Fare settings for one vehicle type. Layers, last one wins:
 //   built-in -> config.json -> figures saved by older versions -> online rates file (API) -> changed on this phone (Admin)
-//   -> the Cost per km price when "Use the Cost per km price" is ticked
+//   The profit margins come from the "profit" block (config.json, then the online file), for every vehicle type.
 //   admin   = this phone's settings (loadSettings())
 //   rateSet = fetchOnlineRateSet() result
 function vehicleSettings(admin, key, cfg, rateSet) {
-  const saved = Number((admin.perKmCalculated || {})[key]);
-  const useCalc = !!(admin.useCalculated || {})[key] && saved > 0;   // "Use the Cost per km price" ticked
-  const perKmOverride = useCalc ? saved : null;
-  const calc = useCalc ? { perKmRate: saved } : {};
-  const configRates = readRateBlock(cfg.vehicles[key] || {});
-  const online = onlineBlock(key, cfg, rateSet) || {};
+  const configRates = { ...readRateBlock(cfg.vehicles[key] || {}), ...readProfit(cfg.profit) };
+  const online = { ...((rateSet && rateSet.profit) || {}), ...(onlineBlock(key, cfg, rateSet) || {}) };
   const vehicleNo = (admin.vehicleNumbers || {})[key] || ''; // this type's number plate (receipts)
   const local = (admin.localOverrides || {})[key] || {};     // changed on this phone
-  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, ...calc, perKmOverride, vehicleNo };
+  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, vehicleNo };
 }
+
+// ---------- Trip types ----------
+// E = expenses per km. The km is always the one-way distance (A -> B).
+//   one way       E × (1 + one way profit)            the passenger pays one way
+//   empty return  E × 2 + E × one way profit          one way, the driver comes back empty (profit on one way only)
+//   round trip    E × 2 × (1 + round trip profit)     there and back with the passenger
+const TRIP_TYPES = {
+  oneway: { name: 'One way', info: 'The passenger pays one way.' },
+  empty: { name: 'Empty return', info: 'One way, and the driver comes back empty.' },
+  round: { name: 'Round trip', info: 'There and back, with the passenger.' }
+};
+const tripTypeOk = (t) => (TRIP_TYPES[t] ? t : 'oneway');
+
+// Price per km for a trip type, to 2 decimals
+function tripPerKm(s, type = 'oneway') {
+  const e = Number(s.expensePerKm) || 0;
+  const one = (Number(s.oneWayProfitPct) || 0) / 100, round = (Number(s.roundTripProfitPct) || 0) / 100;
+  const price = type === 'empty' ? e * 2 + e * one : type === 'round' ? e * 2 * (1 + round) : e * (1 + one);
+  return Math.round(price * 100 + 1e-6) / 100; // + 1e-6: 50.775 is stored as 50.77499999… -> still 50.78
+}
+const tripPrices = (s) => Object.fromEntries(Object.keys(TRIP_TYPES).map((t) => [t, tripPerKm(s, t)]));
 
 // ---------- Trip expenses (Admin "Cost per km" figures) ----------
 const COST_STORE_KEY = 'tuktuk_cost_calc_v2'; // figures saved in the Cost per km tab, per vehicle type
@@ -316,11 +340,6 @@ function tripExpenseParts(x) {
   ];
   if (n(x.driverMonthly)) parts.push(['Driver income per km', div(n(x.driverMonthly) * 12, x.kmPerYear), 'Monthly target × 12 ÷ km per year']);
   return parts;
-}
-
-// Per km price actually charged: the cost per km price when ticked in Admin, else the per km price (API / Admin)
-function effectivePerKmRate(s) {
-  return Number(s.perKmOverride) > 0 ? Number(s.perKmOverride) : Number(s.perKmRate);
 }
 
 // Waiting charge per hour actually used (0 = waiting charge off)
@@ -365,23 +384,24 @@ function waitingRuleText(s) {
 }
 
 /**
- * Distance fare = km × per km price, but never less than the minimum fare.
+ * Distance fare = km × the trip type's price per km, but never less than the minimum fare.
  * Fare = distance fare + waiting charge (after free minutes, in blocks), then rounded (default down to 10).
  */
-function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0) {
+function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0, tripType = 'oneway') {
   // Round to 2 decimals first so float errors (4.1 - 1.1 = 2.9999999999999996) can't change the fare
   const round2 = (n) => Math.round(n * 100) / 100;
   let km = round2(Math.max(0, Number(distanceKm) || 0));
   if (s.roundUpKm) km = Math.ceil(km);
 
-  const perKmRate = effectivePerKmRate(s);
+  tripType = tripTypeOk(tripType);
+  const perKmRate = tripPerKm(s, tripType);
   const minimumFare = Number(s.minimumFare);
   const waitRate = waitingRate(s);
   const waitMins = waitRate ? Math.max(0, Math.round(Number(waitingMins) || 0)) : 0;
   const billedMins = billedWaitingMins(waitMins, s);
   const waitingPart = round2((billedMins / 60) * waitRate);
   if (km === 0) {
-    return { km, perKmRate, minimumFare, kmPart: 0, minimumApplied: false, distanceFare: 0, waitRate, waitMins: 0, billedMins: 0, waitingPart: 0, exact: 0, total: 0 };
+    return { km, tripType, perKmRate, minimumFare, kmPart: 0, minimumApplied: false, distanceFare: 0, waitRate, waitMins: 0, billedMins: 0, waitingPart: 0, exact: 0, total: 0 };
   }
 
   const kmPart = round2(km * perKmRate);
@@ -389,7 +409,7 @@ function calculateFare(distanceKm, s = loadSettings(), waitingMins = 0) {
   const distanceFare = minimumApplied ? minimumFare : kmPart;
   const exact = round2(distanceFare + waitingPart);
   const total = roundFare(exact, s); // default DOWN to nearest 10 (e.g. 89 -> 80, 68.68 -> 60)
-  return { km, perKmRate, minimumFare, kmPart, minimumApplied, distanceFare, waitRate, waitMins, billedMins, waitingPart, exact, total };
+  return { km, tripType, perKmRate, minimumFare, kmPart, minimumApplied, distanceFare, waitRate, waitMins, billedMins, waitingPart, exact, total };
 }
 
 function formatMoney(amount, s = loadSettings()) {

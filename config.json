@@ -3,9 +3,11 @@
   "ratesUrl": "https://tuktukfee.theguru.asia/tuktuk.json",
   "ratesCacheDays": 14,
   "limits": {
-    "fare": { "minimumFare": [0, 5000], "perKm": [1, 500], "roundTo": [1, 100] },
+    "fare": { "minimumFare": [0, 5000], "expensePerKm": [1, 500], "roundTo": [1, 100] },
+    "profit": { "oneWayPct": [0, 500], "roundTripPct": [0, 500] },
     "waiting": { "perHour": [0, 3000], "graceMins": [0, 60], "stepMins": [1, 60] }
   },
+  "profit": { "oneWayPct": 50, "roundTripPct": 15 },
   "defaultVehicle": "tuktuk",
   "vehicles": {
     "tuktuk": {
@@ -13,7 +15,7 @@
       "icon": "🛺",
       "avoidExpressways": true,
       "routePreference": "shortest",
-      "fare": { "minimumFare": 150, "perKm": 65, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
+      "fare": { "minimumFare": 150, "expensePerKm": 33.85, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
         "fuelPrice": 414,
@@ -27,15 +29,7 @@
         "yearlyFixed": 45000,
         "kmPerYear": 30000,
         "driverMonthly": 0,
-        "profitPct": 15,
-        "includeReturn": true,
-        "tripKm": 25,
-        "minFare": 150,
-        "waitMins": 30,
-        "waitPerHour": 300,
-        "tolls": 0,
-        "parking": 0,
-        "night": 0
+        "tripKm": 25
       }
     },
     "bike": {
@@ -43,7 +37,7 @@
       "icon": "🏍️",
       "avoidExpressways": true,
       "routePreference": "shortest",
-      "fare": { "minimumFare": 100, "perKm": 45, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
+      "fare": { "minimumFare": 100, "expensePerKm": 18.15, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 300, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
         "fuelPrice": 414,
@@ -57,15 +51,7 @@
         "yearlyFixed": 15000,
         "kmPerYear": 30000,
         "driverMonthly": 0,
-        "profitPct": 15,
-        "includeReturn": true,
-        "tripKm": 10,
-        "minFare": 100,
-        "waitMins": 15,
-        "waitPerHour": 300,
-        "tolls": 0,
-        "parking": 0,
-        "night": 0
+        "tripKm": 10
       }
     },
     "car": {
@@ -73,7 +59,7 @@
       "icon": "🚗",
       "avoidExpressways": false,
       "routePreference": "main",
-      "fare": { "minimumFare": 400, "perKm": 75, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
+      "fare": { "minimumFare": 400, "expensePerKm": 46.1, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
       "waiting": { "enabled": true, "perHour": 400, "graceMins": 0, "stepMins": 1 },
       "costDefaults": {
         "fuelPrice": 414,
@@ -87,15 +73,7 @@
         "yearlyFixed": 60000,
         "kmPerYear": 30000,
         "driverMonthly": 0,
-        "profitPct": 20,
-        "includeReturn": true,
-        "tripKm": 25,
-        "minFare": 400,
-        "waitMins": 30,
-        "waitPerHour": 400,
-        "tolls": 0,
-        "parking": 0,
-        "night": 0
+        "tripKm": 25
       }
     }
   }

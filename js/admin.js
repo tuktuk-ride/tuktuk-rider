@@ -6,13 +6,15 @@ const SHARED_FIELDS = ['currency', 'googleApiKey', 'adminPin', 'driverName', 'dr
 // Figures each vehicle type has. Their default is the value in the online rates file (that type's block),
 // else the default; any of them can be changed on this phone (saved in settings.localOverrides).
 const RATE_FIELDS = [
+  { id: 'expensePerKm', label: 'Expenses per km', group: 'fare', note: 'Fuel, service, tyres… no profit. Work yours out in 🧮 Cost per km' },
+  { id: 'oneWayProfitPct', label: 'Profit, one way & empty return (%)', group: 'fare' },
+  { id: 'roundTripProfitPct', label: 'Profit, round trip (%)', group: 'fare' },
   { id: 'minimumFare', label: 'Minimum fare', group: 'fare' },
-  { id: 'perKmRate', label: 'Per km price', group: 'fare' },
-  { id: 'roundUpKm', label: 'Charge partial km as a full km (e.g. 3.2 km → 4 km)', group: 'fare', check: true },
   { id: 'waitingEnabled', label: 'Charge for waiting time', group: 'waiting', check: true },
   { id: 'waitingPerHour', label: 'Waiting charge per hour', group: 'waiting' },
-  { id: 'waitingGraceMins', label: 'Free waiting minutes', group: 'waiting', note: 'Waiting up to this is not charged. 0 = charged from the first minute' },
-  { id: 'waitingStepMins', label: 'Charge waiting in blocks of (minutes)', group: 'waiting', note: '1 = every minute. 15 = 1–15 min is charged as 15 min' }
+  { id: 'waitingGraceMins', label: 'Free waiting minutes', group: 'more', note: '0 = charged from the first minute' },
+  { id: 'waitingStepMins', label: 'Charge waiting in blocks of (minutes)', group: 'more', note: '1 = every minute. 15 = 1–15 min is charged as 15 min' },
+  { id: 'roundUpKm', label: 'Charge partial km as a full km (e.g. 3.2 km → 4 km)', group: 'more', check: true }
 ];
 
 let appConfig = FALLBACK_CONFIG;
@@ -38,18 +40,11 @@ const usedSettings = (key) => vehicleSettings(loadSettings(), key, appConfig, ra
 // Settings without this phone's changes (= API value, else default)
 const referenceSettings = (key) => vehicleSettings({ ...loadSettings(), localOverrides: {} }, key, appConfig, rateSet);
 
-// Fields filled from the Cost per km tab while "Use the Cost per km prices" is ticked
-function calcFields(key) {
-  const s = loadSettings();
-  return (s.useCalculated || {})[key] && Number((s.perKmCalculated || {})[key]) > 0 ? ['perKmRate'] : [];
-}
-
-// 'calc' (Cost per km tab, ticked) | 'local' (changed on this phone) | 'api' | 'default'
+// 'local' (changed on this phone) | 'api' (online rates file) | 'default'
 function sourceOf(key, id) {
-  if (calcFields(key).includes(id)) return 'calc';
   if (localFor(loadSettings(), key)[id] !== undefined) return 'local';
-  const block = onlineBlock(key, appConfig, rateSet);
-  return block && block[id] !== undefined ? 'api' : 'default';
+  const block = { ...(rateSet.profit || {}), ...(onlineBlock(key, appConfig, rateSet) || {}) };
+  return block[id] !== undefined ? 'api' : 'default';
 }
 
 function readVehicleInputs(key) {
@@ -89,16 +84,13 @@ function buildVehicleUi() {
     panel.innerHTML = `
       <div class="notice" id="fnotice_${key}"></div>
       ${group('fare')}
-      <div><label for="vno_${key}" class="vno-label"></label>
-        <input type="text" id="vno_${key}" maxlength="20" placeholder="e.g. WP ABC-1234" autocomplete="off"></div>
-      <div class="calc-price" id="calcSlot_${key}">
-        <label class="check"><input type="checkbox" id="usecalc_${key}"> <span id="usecalcText_${key}"></span></label>
-        <p class="hint" id="usecalcHint_${key}"></p>
-      </div>
+      <div class="trip-prices" id="prices_${key}"></div>
       <h3 class="sub">⏱ Waiting charge</h3>
       ${group('waiting')}
       <p class="hint" id="wex_${key}"></p>
-      <p class="hint" id="fex_${key}"></p>
+      <div><label for="vno_${key}" class="vno-label"></label>
+        <input type="text" id="vno_${key}" maxlength="20" placeholder="e.g. WP ABC-1234" autocomplete="off"></div>
+      <details class="more-box"><summary>More options</summary>${group('more')}</details>
       <button class="btn small secondary" type="button" id="fapi_${key}"></button>`;
     RATE_FIELDS.forEach((f) => {
       const wrap = panel.querySelector(`#${fid(key, f.id)}`).closest('.field');
@@ -108,7 +100,6 @@ function buildVehicleUi() {
     panel.querySelector('.vno-label').textContent = `Vehicle No (on ${vname(key)} receipts)`;
     $('vehiclePanels').appendChild(panel);
 
-    $(`usecalc_${key}`).addEventListener('change', (e) => setUseCalculated(key, e.target.checked));
     $(`fapi_${key}`).addEventListener('click', () => useApiValues(key));
   });
 }
@@ -154,9 +145,9 @@ function fillVehicle(key) {
   updateLive(key);
 }
 
-// "API" / "Default" / "Changed on this phone ↩" under each field + the panel notice
+// "Changed on this phone ↩" under each figure changed here (nothing under the others) + the panel notice
 function showSources(key) {
-  const ref = vehicleSettings({ ...loadSettings(), localOverrides: {}, useCalculated: {} }, key, appConfig, rateSet);
+  const ref = referenceSettings(key);
   const s = loadSettings();
   const block = onlineBlockName(key, appConfig, rateSet);
   const refName = isOnline(key) ? 'API' : 'default';
@@ -166,10 +157,7 @@ function showSources(key) {
     const refText = f.check ? (ref[f.id] ? 'on' : 'off') : formatMoney(ref[f.id], s).replace(s.currency + ' ', '');
     line.innerHTML = '';
     line.className = 'src-line src-' + src;
-    $(fid(key, f.id)).disabled = src === 'calc'; // set by the tick below, not typed
-    if (src === 'calc') {
-      line.textContent = `🧮 From the Cost per km tab (${refName}: ${refText}) — untick "Use the Cost per km prices" to change it`;
-    } else if (src === 'local') {
+    if (src === 'local') {
       line.append(`✎ Changed on this phone (${refName}: ${refText}) `);
       const b = document.createElement('button');
       b.type = 'button';
@@ -177,14 +165,12 @@ function showSources(key) {
       b.textContent = `↩ ${refName === 'API' ? 'API' : 'Default'} value`;
       b.addEventListener('click', () => resetField(key, f.id));
       line.append(b);
-    } else {
-      line.textContent = src === 'api' ? `API (${block})` : 'Default';
     }
   });
 
   const changed = Object.keys(localFor(s, key)).length;
   const state = onlineBlockState(key, appConfig, rateSet);
-  const stoppedBy = rateSet.format === 1 ? 'IS_STOPPED true' : '"active" not true, or no valid minimumFare / perKm';
+  const stoppedBy = rateSet.format === 1 ? 'IS_STOPPED true' : '"active" not true, or no valid minimumFare / expensePerKm';
   $(`fnotice_${key}`).textContent =
     (rateSet.reachable === false && !rateSet.cachedAt ? "The online rates file can't be reached right now (no internet, or the file has an error), so the defaults are used."
       : (rateSet.cachedAt ? `The online rates file can't be reached right now, so the copy saved on this phone is used (${onlineSourceText(rateSet).replace('✓ Official rates (', '').replace(')', '')}). ` : '') +
@@ -197,12 +183,25 @@ function showSources(key) {
   $(`fapi_${key}`).disabled = !changed;
 }
 
-// Fare and waiting examples from what is typed (before saving)
+// Prices per km of the 3 trip types + waiting example, from what is typed (before saving)
 function updateLive(key) {
   const s = formSettings(key);
   const money = (n) => formatMoney(n, s);
-  const ex = (km) => `${km} km = ${money(calculateFare(km, s).total)}`;
-  $(`fex_${key}`).textContent = isNaN(s.minimumFare) || isNaN(s.perKmRate) ? '' : `Examples: ${ex(1)} • ${ex(5)} • ${ex(10.5)}`;
+  const box = $(`prices_${key}`);
+  box.innerHTML = '';
+  if ([s.expensePerKm, s.oneWayProfitPct, s.roundTripProfitPct, s.minimumFare].every((n) => Number.isFinite(n))) {
+    const head = document.createElement('div');
+    head.className = 'tp-head';
+    head.textContent = 'Price per km (10 km trip):';
+    box.appendChild(head);
+    Object.keys(TRIP_TYPES).forEach((t) => {
+      const line = document.createElement('div');
+      line.innerHTML = '<span></span><b></b>';
+      line.firstChild.textContent = TRIP_TYPES[t].name;
+      line.lastChild.textContent = `${money(tripPerKm(s, t))}  (${money(calculateFare(10, s, 0, t).total)})`;
+      box.appendChild(line);
+    });
+  }
   const waitFor = (mins) => money(((billedWaitingMins(mins, s) / 60) * waitingRate(s)).toFixed(2));
   $(`wex_${key}`).textContent = waitingRate(s)
     ? `Example: 4 min = ${waitFor(4)} • 25 min = ${waitFor(25)} • 1 h = ${waitFor(60)}` +
@@ -222,7 +221,6 @@ function fillForm() {
     fillVehicle(key);
   });
   renderFareTabs();
-  updateCalcBoxes();
   updateMapBox();
 }
 
@@ -248,7 +246,6 @@ function resetField(key, id) {
   if (f.check) $(fid(key, id)).checked = !!used[id]; else $(fid(key, id)).value = used[id];
   showSources(key);
   updateLive(key);
-  updateCalcBoxes();
   CostCalc.refresh();
   toast(`↩ ${vname(key)}: "${f.label}" back to the ${isOnline(key) ? 'API' : 'default'} value`);
 }
@@ -258,71 +255,32 @@ function useApiValues(key) {
   if (!n || !confirm(`Put all ${n} changed ${vname(key)} figure${n > 1 ? 's' : ''} back to the ${isOnline(key) ? 'API' : 'default'} values?`)) return;
   if (!saveLocal(key, {})) return toast('❌ This browser blocks saving (private mode?)');
   fillVehicle(key);
-  updateCalcBoxes();
   CostCalc.refresh();
   toast(`↩ ${vname(key)}: using the ${isOnline(key) ? 'API' : 'default'} values`);
 }
 
-// ---------- Per km price from the Cost per km tab ----------
-function currentPerKm(key) {
+// ---------- Expenses per km from the Cost per km tab ----------
+function costInfo(key) {
   if (!appConfig.vehicles[key]) key = appConfig.defaultVehicle;
+  const src = sourceOf(key, 'expensePerKm');
   const vs = usedSettings(key);
   return {
-    perKm: effectivePerKmRate(vs),
-    source: vs.perKmOverride ? 'cost per km price, ticked in Settings'
-      : sourceOf(key, 'perKmRate') === 'local' ? 'price changed on this phone'
-        : isOnline(key) ? 'official online rates' : 'default price',
-    online: isOnline(key)
+    settings: vs,
+    expensePerKm: Number(vs.expensePerKm) || 0,
+    source: src === 'local' ? 'set on this phone' : src === 'api' ? 'from the online rates file' : 'default'
   };
 }
 
-// The "Use cost per km price" tick in each fare tab
-function updateCalcBoxes() {
-  const s = loadSettings();
-  vehicleKeys().forEach((key) => {
-    const name = vname(key);
-    const saved = Number((s.perKmCalculated || {})[key]);
-    const used = !!(s.useCalculated || {})[key] && saved > 0;
-    const plain = vehicleSettings({ ...s, useCalculated: {} }, key, appConfig, rateSet); // without the tick
-    const m = (n) => formatMoney(n, s);
-    const refName = isOnline(key) ? 'API' : 'default';
-    $(`usecalc_${key}`).checked = used;
-    $(`usecalc_${key}`).disabled = !(saved > 0);
-    $(`usecalcText_${key}`).textContent = saved > 0
-      ? `Use the Cost per km price (${m(saved)} per km)` : 'Use the Cost per km price';
-    $(`usecalcHint_${key}`).textContent = !(saved > 0)
-      ? `No ${name} cost per km price saved yet. Work one out in the 🧮 Cost per km tab and press Save.`
-      : used ? `✓ Applied from the 🧮 Cost per km tab (${m(saved)} per km). Untick to go back to the ${refName} price (${m(effectivePerKmRate(plain))} per km).`
-        : `Now charging the ${refName} price: ${m(effectivePerKmRate(plain))} per km.`;
-    $(`calcSlot_${key}`).classList.toggle('active', used);
-    updateLive(key);
-  });
-}
-
-// The per km field shows the price in use (the Cost per km price while ticked)
-function showCalcFields(key) {
-  $(fid(key, 'perKmRate')).value = usedSettings(key).perKmRate;
+// "Use as my expenses per km": this phone's own expenses (back to the API value when it is the same)
+function useExpense(value, key) {
+  const local = { ...localFor(loadSettings(), key) };
+  if (value === Number(referenceSettings(key).expensePerKm)) delete local.expensePerKm;
+  else local.expensePerKm = value;
+  if (!saveLocal(key, local)) return toast('❌ This browser blocks saving (private mode?)');
+  $(fid(key, 'expensePerKm')).value = usedSettings(key).expensePerKm;
   showSources(key);
-}
-
-function setUseCalculated(key, on) {
-  const s = loadSettings();
-  s.useCalculated = { ...(s.useCalculated || {}), [key]: on };
-  if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
-  showCalcFields(key);
-  updateCalcBoxes();
-  CostCalc.refresh();
-  toast(on ? `✅ ${vname(key)}: using the Cost per km price` : `↩ ${vname(key)}: back to the ${isOnline(key) ? 'API' : 'default'} price`);
-}
-
-function saveCalculatorPrice(perKm, key) {
-  const s = loadSettings();
-  s.perKmCalculated = { ...(s.perKmCalculated || {}), [key]: perKm };
-  if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
-  showCalcFields(key);
-  updateCalcBoxes();
-  const used = (s.useCalculated || {})[key];
-  toast(`💾 ${vname(key)}: ${formatMoney(perKm, s)} saved` + (used ? ' and in use' : ' — tick it in Fare rates to use it'));
+  updateLive(key);
+  toast(`✅ ${vname(key)}: expenses ${formatMoney(value, loadSettings())} per km — prices updated`);
 }
 
 // ---------- Admin tabs (Settings / Cost per km) ----------
@@ -350,9 +308,8 @@ async function login() {
   $('settingsForm').classList.remove('hidden');
   fillForm();
   CostCalc.init({
-    getCurrent: currentPerKm,
-    getSaved: (key) => (loadSettings().perKmCalculated || {})[key],
-    onSave: saveCalculatorPrice,
+    getCurrent: costInfo,
+    onUseExpense: useExpense,
     openFareTab: showFareTab
   });
 }
@@ -368,7 +325,8 @@ $('settingsForm').addEventListener('input', (e) => {
 
 // ---------- Save ----------
 const VALIDATION = [
-  ['minimumFare', (v) => v >= 0], ['perKmRate', (v) => v >= 0], ['waitingPerHour', (v) => v >= 0],
+  ['expensePerKm', (v) => v > 0], ['oneWayProfitPct', (v) => v >= 0], ['roundTripProfitPct', (v) => v >= 0],
+  ['minimumFare', (v) => v >= 0], ['waitingPerHour', (v) => v >= 0],
   ['waitingGraceMins', (v) => v >= 0], ['waitingStepMins', (v) => v >= 1]
 ];
 
@@ -402,7 +360,10 @@ $('settingsForm').addEventListener('submit', (e) => {
       if (bad) {
         activeFareTab = key;
         renderFareTabs();
-        return toast(`${vname(key)}: please enter a valid "${RATE_FIELDS.find((x) => x.id === bad[0]).label}"`);
+        const field = RATE_FIELDS.find((x) => x.id === bad[0]);
+        if (field.group === 'more') $(panelId(key)).querySelector('details.more-box').open = true; // show the folded field
+        $(fid(key, field.id)).focus();
+        return toast(`${vname(key)}: please enter a valid "${field.label}"`);
       }
     }
   }
@@ -410,7 +371,7 @@ $('settingsForm').addEventListener('submit', (e) => {
   if (s.mapProvider === 'google' && !s.googleApiKey) return toast('Enter a Google API key, or choose OpenStreetMap');
   if (!saveSettings(s)) return toast('❌ This browser blocks saving (private mode?)');
   vehicleKeys().forEach(showSources);
-  updateCalcBoxes();
+  vehicleKeys().forEach(updateLive);
   CostCalc.refresh();
   const changed = Object.values(s.localOverrides).reduce((n, o) => n + Object.keys(o).length, 0);
   toast(changed ? `✅ Settings saved — ${changed} figure${changed > 1 ? 's' : ''} changed from the API on this phone` : '✅ Settings saved');

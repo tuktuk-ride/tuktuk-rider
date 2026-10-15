@@ -42,6 +42,7 @@ function applyMode() {
     $('calcMapBtn').textContent = 'Estimate fare';
     $('calcDistanceBtn').textContent = 'Estimate fare';
     ratesReady.then(() => isPassenger() && updateExpresswayBox());
+    renderTripTypes(); // names only: each vehicle type has its own price per km
     $('waitingTitle').textContent = '⏱ Expected waiting (optional)';
     ratesReady.then(() => {
       if (!isPassenger()) return;
@@ -105,8 +106,8 @@ function showEstimates(routes) {
 
 function estimateFor(key, route, waitMins) {
   const s = vehicleSettings(officialBase(), key, appConfig, rateSet);
-  const low = calculateFare(route.km, s, waitMins).total;
-  const high = route.entered ? low : calculateFare(route.km * ESTIMATE_SPREAD, s, waitMins).total; // typed km: exact
+  const low = calculateFare(route.km, s, waitMins, tripType).total;
+  const high = route.entered ? low : calculateFare(route.km * ESTIMATE_SPREAD, s, waitMins, tripType).total; // typed km: exact
   return { key, s, low, high, plusToll: usesExpressway(route, key), official: vehicleOnline(key, appConfig, rateSet) };
 }
 
@@ -121,7 +122,7 @@ function renderEstimates() {
   const list = Object.keys(appConfig.vehicles).map((key) => ({ ...estimateFor(key, lastRoutes[key], waitMins), route: lastRoutes[key] }));
 
   const entered = list[0].route.entered;
-  $('estimateTrip').textContent = (entered ? `Distance entered: ${list[0].route.km} km`
+  $('estimateTrip').textContent = TRIP_TYPES[tripType].name + '  •  ' + (entered ? `Distance entered: ${list[0].route.km} km`
     : 'Shortest route for each vehicle type' +
       ($('useExpressway').checked ? ' (cars may use the expressway; tuk-tuks and bikes never)' : ' (no expressways)')) +
     (waitMins ? `  •  ${formatWaiting(waitMins)} waiting` : '');
@@ -138,7 +139,7 @@ function renderEstimates() {
     row.querySelector('small').textContent =
       `${e.route.km.toFixed(1)} km` + (e.route.mins ? ` (~${e.route.mins} min)` : '') +
       (e.plusToll && e.route.expresswayKm ? ` incl. ${e.route.expresswayKm} km expressway (toll extra)` : '') +
-      ` • minimum ${formatMoney(e.s.minimumFare, e.s)} • ${formatMoney(effectivePerKmRate(e.s), e.s)} per km` +
+      ` • minimum ${formatMoney(e.s.minimumFare, e.s)} • ${formatMoney(tripPerKm(e.s, tripType), e.s)} per km` +
       (waitMins && waitingRate(e.s) ? ` • waiting ${formatMoney(waitingRate(e.s), e.s)}/h` : '');
     row.querySelector('.est-price').textContent = priceText(e);
     box.appendChild(row);

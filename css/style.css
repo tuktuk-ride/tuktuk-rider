@@ -279,6 +279,9 @@ header h1, .header-actions a, .install-btn { white-space: nowrap; }
 .calc-table td { vertical-align: top; }
 .calc-table .row-note { font-size: .75rem; color: var(--muted); }
 .calc-table tr.strong td { font-weight: 700; }
+.calc-table tr.trip-head td { padding-top: 14px; border-top: 2px solid var(--border); }
+.calc-table tr.trip-head:first-child td { border-top: 0; padding-top: 4px; }
+.calc-table td:last-child { white-space: nowrap; } /* amounts on one line */
 .charge-box { text-align: center; margin: 16px 0 12px; }
 .charge-box .total { font-size: 2rem; font-weight: 800; color: var(--accent); margin: 2px 0; }
 
@@ -380,3 +383,24 @@ body.fare-page:not([data-mode]) main { visibility: hidden; } /* home page, until
 .rc-text { display: flex; flex-direction: column; min-width: 0; }
 .rc-text small { color: var(--muted); }
 .rc-fare { margin-left: auto; font-weight: 700; white-space: nowrap; }
+
+/* Trip type: one way / empty return / round trip */
+.trip-card { padding-top: 12px; padding-bottom: 10px; }
+.trip-types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.trip-type {
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 4px; background: var(--card); color: var(--text);
+  font: inherit; font-size: .85rem; line-height: 1.25; cursor: pointer; text-align: center;
+}
+.trip-type b { display: block; }
+.trip-type small { display: block; color: var(--muted); font-size: .78rem; }
+.trip-type.active { background: var(--brand); border-color: var(--brand-dark); }
+.trip-type.active small { color: #1d1f23; }
+.trip-card .hint { margin: 6px 0 0; }
+
+/* Settings → Fare rates: prices of the 3 trip types, and the folded "More options" */
+.trip-prices { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: #fff7e0; border: 1px solid #f3d27a; font-size: .9rem; }
+.trip-prices .tp-head { font-weight: 700; margin-bottom: 4px; }
+.trip-prices div:not(.tp-head) { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.more-box { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--border); }
+.more-box summary { font-weight: 700; font-size: .95rem; cursor: pointer; }
+.src-line:empty { display: none; }
