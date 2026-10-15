@@ -90,6 +90,9 @@ function buildVehicleUi() {
       <p class="hint" id="wex_${key}"></p>
       <div><label for="vno_${key}" class="vno-label"></label>
         <input type="text" id="vno_${key}" maxlength="20" placeholder="e.g. WP ABC-1234" autocomplete="off"></div>
+      <div><label for="seat_${key}" class="vno-label">Passengers (driver not counted)</label>
+        <input type="number" id="seat_${key}" min="1" max="60" step="1" inputmode="numeric">
+        <p class="hint" id="seatnote_${key}"></p></div>
       <details class="more-box"><summary>More options</summary>${group('more')}</details>
       <button class="btn small secondary" type="button" id="fapi_${key}"></button>`;
     RATE_FIELDS.forEach((f) => {
@@ -218,6 +221,11 @@ function fillForm() {
   vehicleKeys().forEach((key) => {
     $(`vt_${key}`).checked = enabled.includes(key);
     $(`vno_${key}`).value = (s.vehicleNumbers || {})[key] || '';
+    const official = vehicleSettings({}, key, appConfig, rateSet).passengers; // rates file, else config.json
+    $(`seat_${key}`).placeholder = official ? String(official) : '';
+    $(`seat_${key}`).value = readSeats((s.vehicleSeats || {})[key]) || '';
+    $(`seatnote_${key}`).textContent = (official ? `Standard: ${seatsWords(official)}. ` : '') +
+      'Leave empty to use the standard count; fill in only if your vehicle carries a different number.';
     fillVehicle(key);
   });
   renderFareTabs();
@@ -350,6 +358,7 @@ $('settingsForm').addEventListener('submit', (e) => {
     mapProvider: document.querySelector('input[name="mapProvider"]:checked').value,
     enabledVehicles: vehicleKeys().filter((key) => $(`vt_${key}`).checked),
     vehicleNumbers: Object.fromEntries(vehicleKeys().map((key) => [key, $(`vno_${key}`).value.trim()]).filter(([, v]) => v)),
+    vehicleSeats: Object.fromEntries(vehicleKeys().map((key) => [key, readSeats($(`seat_${key}`).value)]).filter(([, v]) => v)),
     localOverrides: {}
   };
   s.currency = s.currency || 'Rs.';

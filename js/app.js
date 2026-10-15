@@ -133,7 +133,8 @@ const ratesReady = Promise.all([fetchOnlineRateSet(), loadAppConfig()]).then(([s
   keys.forEach((k) => {
     const opt = document.createElement('option');
     opt.value = k;
-    opt.textContent = vehicleLabel(appConfig, k);
+    const seats = vehicleSettings(adminSettings, k, appConfig, rateSet).passengers;
+    opt.textContent = vehicleLabel(appConfig, k) + (seats ? `  ·  ${seatsText(seats)}` : '');
     $('vehicleSelect').appendChild(opt);
   });
   const start = keys.includes(adminSettings.selectedVehicle) ? adminSettings.selectedVehicle : keys[0];

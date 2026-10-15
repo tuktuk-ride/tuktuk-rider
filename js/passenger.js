@@ -135,8 +135,8 @@ function renderEstimates() {
     const row = document.createElement('div');
     row.className = 'est-row';
     row.innerHTML = '<div class="est-name"><b></b><small></small></div><div class="est-price"></div>';
-    row.querySelector('b').textContent = vehicleLabel(appConfig, e.key);
-    row.querySelector('small').textContent =
+    row.querySelector('b').textContent = vehicleLabel(appConfig, e.key) + (e.s.passengers ? `  ${seatsText(e.s.passengers)}` : '');
+    row.querySelector('small').textContent = (e.s.passengers ? `up to ${seatsWords(e.s.passengers)} • ` : '') +
       `${e.route.km.toFixed(1)} km` + (e.route.mins ? ` (~${e.route.mins} min)` : '') +
       (e.plusToll && e.route.expresswayKm ? ` incl. ${e.route.expresswayKm} km expressway (toll extra)` : '') +
       ` • minimum ${formatMoney(e.s.minimumFare, e.s)} • ${formatMoney(tripPerKm(e.s, tripType), e.s)} per km` +
@@ -161,7 +161,7 @@ function estimateText() {
     '🛺 TukTuk Rider — fare estimate',
     ...[$('estimateFrom').textContent, $('estimateTo').textContent].filter(Boolean),
     $('estimateTrip').textContent.replace(/\s+•\s+/g, ' • '),
-    ...lastEstimates.map((e) => `${vehicleLabel(appConfig, e.key)} (${e.route.km.toFixed(1)} km): ${priceText(e)}`)
+    ...lastEstimates.map((e) => `${vehicleLabel(appConfig, e.key)} (${e.s.passengers ? seatsWords(e.s.passengers) + ', ' : ''}${e.route.km.toFixed(1)} km): ${priceText(e)}`)
   ];
   return lines.join('\n');
 }

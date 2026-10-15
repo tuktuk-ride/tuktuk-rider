@@ -21,6 +21,7 @@
     "bike": {
       "name": "Bike",
       "icon": "🏍️",
+      "passengers": 1,
       "avoidExpressways": true,
       "routePreference": "shortest",
       "fare": { "minimumFare": 100, "expensePerKm": 18.15, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
@@ -56,6 +57,7 @@
     "tuktuk": {
       "name": "Tuktuk",
       "icon": "🛺",
+      "passengers": 3,
       "avoidExpressways": true,
       "routePreference": "shortest",
       "fare": { "minimumFare": 150, "expensePerKm": 33.85, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
@@ -93,6 +95,7 @@
     "minicar": {
       "name": "Mini car",
       "icon": "🚗",
+      "passengers": 3,
       "avoidExpressways": false,
       "routePreference": "main",
       "fare": { "minimumFare": 300, "expensePerKm": 38.89, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
@@ -130,6 +133,7 @@
     "car": {
       "name": "Car",
       "icon": "🚘",
+      "passengers": 4,
       "avoidExpressways": false,
       "routePreference": "main",
       "fare": { "minimumFare": 400, "expensePerKm": 46.1, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
@@ -168,6 +172,7 @@
     "minivan": {
       "name": "Mini van",
       "icon": "🚙",
+      "passengers": 6,
       "avoidExpressways": false,
       "routePreference": "main",
       "fare": { "minimumFare": 500, "expensePerKm": 52.99, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
@@ -205,6 +210,7 @@
     "van": {
       "name": "Van",
       "icon": "🚐",
+      "passengers": 10,
       "avoidExpressways": false,
       "routePreference": "main",
       "fare": { "minimumFare": 1000, "expensePerKm": 75.56, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },
@@ -243,6 +249,7 @@
     "minibus": {
       "name": "Mini bus",
       "icon": "🚌",
+      "passengers": 26,
       "avoidExpressways": false,
       "routePreference": "main",
       "fare": { "minimumFare": 2500, "expensePerKm": 118.1, "roundUpKm": false, "roundMode": "down", "roundTo": 10 },

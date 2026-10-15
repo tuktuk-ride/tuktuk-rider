@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
   localOverrides: {},   // figures changed in Admin on this phone, per vehicle type; they win over the API,
                         // e.g. { car: { expensePerKm: 48, oneWayProfitPct: 40 } }. Unchanged figures follow the API.
   vehicleNumbers: {},   // number plate per vehicle type, shown on that type's receipts, e.g. { tuktuk: 'WP ABC-1234' }
+  vehicleSeats: {},     // passengers per vehicle type set on this phone (driver not counted), e.g. { van: 12 }
   driverPhone: ''
 };
 
@@ -164,8 +165,17 @@ function readRateBlock(block, limits = {}) {
 function parseOnlineBlock(block, limits) {
   if (block.active !== true) return null;
   const rates = readRateBlock(block, limits);
+  if (readSeats(block.passengers)) rates.passengers = readSeats(block.passengers);
   return 'minimumFare' in rates && 'expensePerKm' in rates ? rates : null;
 }
+
+// Passengers a vehicle carries, driver not counted: a whole number 1-60, else 0 (= not known)
+function readSeats(v) {
+  const n = Number(v);
+  return v !== '' && v !== null && Number.isInteger(n) && n >= 1 && n <= 60 ? n : 0;
+}
+const seatsText = (n) => (n ? `👤 ${n}` : '');
+const seatsWords = (n) => (n ? `${n} passenger${n === 1 ? '' : 's'}` : '');
 
 // Older online file: settings overrides from one set of UPPER_CASE fields (top level, or a vehicle block),
 // or null when that set is stopped (IS_STOPPED not false) or has no valid prices.
@@ -327,7 +337,10 @@ function vehicleSettings(admin, key, cfg, rateSet) {
   const online = { ...((rateSet && rateSet.profit) || {}), ...(onlineBlock(key, cfg, rateSet) || {}) };
   const vehicleNo = (admin.vehicleNumbers || {})[key] || ''; // this type's number plate (receipts)
   const local = (admin.localOverrides || {})[key] || {};     // changed on this phone
-  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, vehicleNo };
+  // passengers, driver not counted: this phone (Admin) -> online rates file -> config.json
+  const passengers = readSeats((admin.vehicleSeats || {})[key]) || readSeats(online.passengers) ||
+    readSeats((cfg.vehicles[key] || {}).passengers);
+  return { ...admin, ...RATE_DEFAULTS, ...configRates, ...legacyRates(admin, key, cfg), ...online, ...local, vehicleNo, passengers };
 }
 
 // ---------- Trip types ----------
