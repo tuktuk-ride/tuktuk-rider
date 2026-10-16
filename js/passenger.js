@@ -1,7 +1,7 @@
 // Rider / Passenger mode.
 // Rider: the full fare tool (map, meter, waiting, receipts, Admin).
-// Passenger: an estimate for every vehicle type, from the official online rates only
-// (never a rider phone's own changes). Mode is remembered on the phone; ?mode=passenger or
+// Passenger: an estimate for every vehicle type, or one chosen type with its roads (like the rider's),
+// from the official online rates only (never a rider phone's own changes). Mode is remembered on the phone; ?mode=passenger or
 // ?mode=rider in the link sets it (e.g. a QR code inside the vehicle).
 const MODE_KEY = 'tuktuk_app_mode';
 const ESTIMATE_SPREAD = 1.15; // upper end of the range allows ~15% for detours / traffic
@@ -41,19 +41,13 @@ function applyMode() {
     if (document.querySelector('.tab.active').dataset.panel === 'meterPanel') document.querySelector('.tab[data-panel="mapPanel"]').click();
     $('calcMapBtn').textContent = 'Estimate fare';
     $('calcDistanceBtn').textContent = 'Estimate fare';
-    ratesReady.then(() => isPassenger() && updateExpresswayBox());
-    renderTripTypes(); // names only: each vehicle type has its own price per km
     $('waitingTitle').textContent = '⏱ Expected waiting (optional)';
-    ratesReady.then(() => {
-      if (!isPassenger()) return;
-      $('waitingCard').classList.remove('hidden');
-      $('waitingInfo').textContent = "Each vehicle type's waiting charge is added to its estimate.";
-    });
+    ratesReady.then(() => isPassenger() && applyPassengerVehicle(fillVehicleSelect(), false));
   } else {
     $('calcMapBtn').textContent = 'Calculate Fare';
     $('calcDistanceBtn').textContent = 'Calculate Fare';
     $('waitingTitle').textContent = '⏱ Waiting time';
-    ratesReady.then(() => { if (appMode === 'rider') applyVehicle(currentVehicle, false); }); // rider's waiting box / rates
+    ratesReady.then(() => { if (appMode === 'rider') applyVehicle(fillVehicleSelect(), false); }); // rider's list, waiting box, rates
   }
   // the map was hidden while choosing: let it measure itself again
   setTimeout(() => provider && provider.resize && provider.resize(), 50);
@@ -134,7 +128,12 @@ function renderEstimates() {
   list.forEach((e) => {
     const row = document.createElement('div');
     row.className = 'est-row';
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.title = 'Choose this vehicle type';
     row.innerHTML = '<div class="est-name"><b></b><small></small></div><div class="est-price"></div>';
+    row.addEventListener('click', () => applyPassengerVehicle(e.key));
+    row.addEventListener('keydown', (ev) => (ev.key === 'Enter' || ev.key === ' ') && applyPassengerVehicle(e.key));
     row.querySelector('b').textContent = vehicleLabel(appConfig, e.key) + (e.s.passengers ? `  ${seatsText(e.s.passengers)}` : '');
     row.querySelector('small').textContent = (e.s.passengers ? `up to ${seatsWords(e.s.passengers)} • ` : '') +
       `${e.route.km.toFixed(1)} km` + (e.route.mins ? ` (~${e.route.mins} min)` : '') +
@@ -166,9 +165,10 @@ function estimateText() {
   return lines.join('\n');
 }
 
-$('shareEstimateBtn').addEventListener('click', async () => {
+$('shareEstimateBtn').addEventListener('click', () => shareEstimate(estimateText()));
+
+async function shareEstimate(text) {
   const url = location.origin + location.pathname + '?mode=passenger';
-  const text = estimateText();
   if (navigator.share) {
     try { await navigator.share({ title: 'TukTuk Rider fare estimate', text, url }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
@@ -179,7 +179,7 @@ $('shareEstimateBtn').addEventListener('click', async () => {
   } catch (e) {
     alert(text);
   }
-});
+}
 
 // Expected waiting changed: update the estimates on screen
 ['waitHours', 'waitMinutes'].forEach((id) => ['input', 'change'].forEach((ev) => $(id).addEventListener(ev, () => {

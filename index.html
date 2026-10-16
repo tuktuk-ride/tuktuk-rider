@@ -46,14 +46,15 @@
     <!-- PASSENGER: what this page does -->
     <section class="card passenger-only">
       <h2>🙋 Fare estimate</h2>
-      <p class="hint" style="margin:0">Choose where you start and where you are going. You'll see the estimated fare for each vehicle type.</p>
+      <p class="hint" style="margin:0">Choose a vehicle type (or compare them all), then where you start and where you are going.</p>
     </section>
 
-    <div class="card rider-only">
+    <div class="card">
       <label for="vehicleSelect" class="vehicle-label">Vehicle type</label>
       <select id="vehicleSelect"><option>Loading…</option></select>
-      <p class="rate-info" id="rateInfo"></p>
-      <p class="hint" id="rateSource"></p>
+      <p class="rate-info rider-only" id="rateInfo"></p>
+      <p class="hint rider-only" id="rateSource"></p>
+      <p class="hint passenger-only" id="passengerVehicleHint"></p>
     </div>
 
     <!-- TRIP TYPE: one way / empty return / round trip (rider and passenger) -->
@@ -174,27 +175,35 @@
         <div id="estimateFrom"></div>
         <div id="estimateTo"></div>
       </div>
+      <p class="hint">Tap a vehicle type to choose it and see its roads.</p>
       <div id="estimateList"></div>
       <p class="hint" id="estimateNote"></p>
       <button class="btn" id="shareEstimateBtn" type="button">📤 Share estimate</button>
     </section>
 
     <!-- RESULT -->
-    <section class="card result rider-only hidden" id="resultCard">
+    <section class="card result hidden" id="resultCard">
+      <h2 class="passenger-only">Estimated fare</h2>
       <div class="distance" id="resultDistance"></div>
       <div class="total" id="resultTotal"></div>
       <div class="distance" id="resultDuration"></div>
       <div class="route-choices hidden" id="routeChoices">
         <div class="rc-title" id="routeChoiceTitle"></div>
-        <p class="hint">Tap the road you will take, here or on the map. The fare and receipt use that route.</p>
+        <p class="hint rider-only">Tap the road you will take, here or on the map. The fare and receipt use that route.</p>
+        <p class="hint passenger-only">Tap a road, here or on the map, to see its fare.</p>
         <div id="routeChoiceList"></div>
         <p class="hint rc-legend hidden" id="routeExpresswayLegend"><span class="rc-swatch"></span> Red = the part on the expressway (toll paid on top)</p>
         <button class="btn small secondary" id="ownRoadBtn" type="button">➕ Choose my own road</button>
         <p class="hint">Not the right road? Tap the route on the map (or use the button) for a ✚ pin, then drag the pin onto the road you will take.</p>
       </div>
       <table class="breakdown" id="resultBreakdown"></table>
+      <p class="hint passenger-only" id="resultNote"></p>
+      <div class="row passenger-only">
+        <button class="btn secondary" id="compareAllBtn" type="button">🚦 Compare all vehicle types</button>
+        <button class="btn" id="shareTripBtn" type="button">📤 Share estimate</button>
+      </div>
 
-      <div class="receipt-box">
+      <div class="receipt-box rider-only">
         <label for="passengerName">Passenger name (optional, for receipt)</label>
         <input type="text" id="passengerName" placeholder="e.g. Nimal" autocomplete="off">
         <div class="row">

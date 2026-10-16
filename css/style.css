@@ -16,6 +16,7 @@
 html, body {
   margin: 0;
   padding: 0;
+  overflow-x: clip; /* nothing may make the page wider than the phone: it zooms out and the fixed footer floats up */
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -34,7 +35,8 @@ header {
   top: 0;
   z-index: 10;
 }
-header h1 { font-size: 1.15rem; margin: 0; }
+header { gap: 8px; }
+header h1 { font-size: 1.15rem; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; } /* shrinks with "…" first */
 header a { color: #1d1f23; text-decoration: none; font-weight: 600; font-size: .9rem; }
 
 main {
@@ -233,7 +235,7 @@ input:disabled { background: #f0f1f3; color: var(--muted); cursor: not-allowed; 
 .notice { margin-bottom: 8px; }
 
 /* Install app */
-.header-actions { display: flex; align-items: center; gap: 12px; }
+.header-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .install-btn {
   border: 2px solid #1d1f23;
   background: transparent;
@@ -353,12 +355,14 @@ body.fare-page:not([data-mode]) main { visibility: hidden; } /* home page, until
 .est-places div { margin-top: 2px; }
 .est-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
 .est-row:first-child { border-top: none; }
+.est-row[role="button"] { cursor: pointer; border-radius: 8px; }
+.est-row[role="button"]:hover, .est-row[role="button"]:focus-visible { background: var(--bg, rgba(0, 0, 0, .04)); }
 .est-name small { display: block; color: var(--muted); font-size: .78rem; margin-top: 2px; }
 .est-price { font-weight: 800; font-size: 1.15rem; color: var(--accent); white-space: nowrap; text-align: right; }
 #estimateList { margin-top: 8px; border-top: 1px solid var(--border); }
 
-/* Small phones: header buttons as icons only (full words stay in the tooltip) */
-@media (max-width: 400px) {
+/* Phones: header buttons as icons only (full words stay in the tooltip) */
+@media (max-width: 480px) {
   .hide-small { display: none; }
 }
 

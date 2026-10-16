@@ -10,9 +10,14 @@ const TRIP_KEY = 'tuktuk_trip_type';
 let tripType = 'oneway';
 try { tripType = tripTypeOk(localStorage.getItem(TRIP_KEY)); } catch (e) { /* storage blocked */ }
 
-// The 3 buttons: name + this vehicle's price per km (rider); names only for passengers (every vehicle type)
+// Passenger mode (js/passenger.js); passengerKey = the one vehicle type a passenger chose, '' = compare all types
+const inPassengerMode = () => typeof isPassenger === 'function' && isPassenger();
+let passengerKey = '';
+const comparingAll = () => inPassengerMode() && !passengerKey;
+
+// The 3 buttons: name + this vehicle's price per km; names only when a passenger compares every vehicle type
 function renderTripTypes() {
-  const passenger = typeof isPassenger === 'function' && isPassenger();
+  const passenger = comparingAll();
   const prices = tripPrices(settings);
   document.querySelectorAll('#tripTypes .trip-type').forEach((b) => {
     const t = b.dataset.trip;
@@ -28,7 +33,7 @@ document.querySelectorAll('#tripTypes .trip-type').forEach((b) => b.addEventList
   tripType = tripTypeOk(b.dataset.trip);
   try { localStorage.setItem(TRIP_KEY, tripType); } catch (e) { /* storage blocked */ }
   renderTripTypes();
-  if (typeof isPassenger === 'function' && isPassenger()) {
+  if (comparingAll()) {
     if (!$('estimateCard').classList.contains('hidden')) renderEstimates();
     return;
   }
@@ -72,7 +77,7 @@ const TOLL_WORDS = ' + expressway toll';
 
 // The tick only matters for vehicle types allowed on expressways
 function updateExpresswayBox() {
-  const passenger = typeof isPassenger === 'function' && isPassenger();
+  const passenger = comparingAll();
   const anyAllowed = Object.keys(appConfig.vehicles).some(expresswayAllowed);
   $('expresswayBox').classList.toggle('hidden', passenger ? !anyAllowed : !expresswayAllowed(currentVehicle));
   $('expresswayHint').textContent = passenger
@@ -121,25 +126,72 @@ function applyVehicle(key, remember = true) {
   if (remember) saveSettings({ ...loadSettings(), selectedVehicle: key });
 }
 
-$('vehicleSelect').addEventListener('change', () => applyVehicle($('vehicleSelect').value));
+$('vehicleSelect').addEventListener('change', () =>
+  (inPassengerMode() ? applyPassengerVehicle($('vehicleSelect').value) : applyVehicle($('vehicleSelect').value)));
+
+// The vehicle list. Rider: the types ticked in Admin. Passenger: "All vehicle types" (compare) + every type.
+// Returns the type to start with ('' = compare all).
+const PASSENGER_VEHICLE_KEY = 'tuktuk_passenger_vehicle';
+function fillVehicleSelect() {
+  const passenger = inPassengerMode();
+  const keys = passenger ? Object.keys(appConfig.vehicles) : enabledVehicles();
+  const base = passenger ? officialBase() : adminSettings;
+  const sel = $('vehicleSelect');
+  sel.innerHTML = '';
+  const add = (value, text) => { const opt = document.createElement('option'); opt.value = value; opt.textContent = text; sel.appendChild(opt); };
+  if (passenger) add('', '🚦 All vehicle types (compare prices)');
+  keys.forEach((k) => {
+    const seats = vehicleSettings(base, k, appConfig, rateSet).passengers;
+    add(k, vehicleLabel(appConfig, k) + (seats ? `  ·  ${seatsText(seats)}` : ''));
+  });
+  let start;
+  if (passenger) {
+    try { start = localStorage.getItem(PASSENGER_VEHICLE_KEY) || ''; } catch (e) { start = ''; }
+    if (!keys.includes(start)) start = '';
+  } else {
+    const saved = loadSettings().selectedVehicle;
+    start = keys.includes(saved) ? saved : keys[0];
+  }
+  sel.value = start;
+  return start;
+}
+
+// Passenger chose a vehicle type: official rates only (never this phone's own changes), its own roads.
+// '' = compare every vehicle type (the estimate list).
+function applyPassengerVehicle(key, remember = true) {
+  passengerKey = appConfig.vehicles[key] ? key : '';
+  if (remember) try { localStorage.setItem(PASSENGER_VEHICLE_KEY, passengerKey); } catch (e) { /* storage blocked */ }
+  if (passengerKey) {
+    currentVehicle = passengerKey;
+    settings = vehicleSettings(officialBase(), passengerKey, appConfig, rateSet);
+  }
+  $('vehicleSelect').value = passengerKey;
+  $('passengerVehicleHint').textContent = passengerKey
+    ? 'Official rates. You will see the roads and the fare for this vehicle type.'
+    : 'Choose a vehicle type to see its roads, or compare the fare of every type.';
+  updateExpresswayBox();
+  renderTripTypes();
+  $('waitingCard').classList.toggle('hidden', !!passengerKey && !waitingRate(settings));
+  $('waitingInfo').textContent = passengerKey
+    ? `Charged at ${formatMoney(waitingRate(settings), settings)} per hour` + (waitingRuleText(settings) ? ` (${waitingRuleText(settings)}).` : '.')
+    : "Each vehicle type's waiting charge is added to its estimate.";
+  // a trip on screen: work it out again for the new choice
+  const shown = !$('resultCard').classList.contains('hidden') || !$('estimateCard').classList.contains('hidden');
+  hideResult();
+  if (!shown) return;
+  const panel = document.querySelector('.tab.active').dataset.panel;
+  if (panel === 'mapPanel' && points.start && points.end) $('calcMapBtn').click();
+  else if (panel === 'distancePanel') $('calcDistanceBtn').click();
+}
 
 $('rateInfo').textContent = 'Loading rates…';
 // Every fare calculation waits for this, so a fare is never worked out with the wrong rates.
 const ratesReady = Promise.all([fetchOnlineRateSet(), loadAppConfig()]).then(([set, cfg]) => {
   rateSet = set;
   appConfig = cfg;
-  const keys = enabledVehicles();
-  $('vehicleSelect').innerHTML = '';
-  keys.forEach((k) => {
-    const opt = document.createElement('option');
-    opt.value = k;
-    const seats = vehicleSettings(adminSettings, k, appConfig, rateSet).passengers;
-    opt.textContent = vehicleLabel(appConfig, k) + (seats ? `  ·  ${seatsText(seats)}` : '');
-    $('vehicleSelect').appendChild(opt);
-  });
-  const start = keys.includes(adminSettings.selectedVehicle) ? adminSettings.selectedVehicle : keys[0];
-  $('vehicleSelect').value = start;
-  applyVehicle(start, false);
+  const start = fillVehicleSelect();
+  if (inPassengerMode()) applyPassengerVehicle(start, false);
+  else applyVehicle(start, false);
 });
 
 // ---------- Tabs ----------
@@ -191,6 +243,12 @@ function renderResult() {
     (f.waitMins ? `  •  Waiting: ${formatWaiting(f.waitMins)}` : '');
   $('resultTotal').textContent = formatMoney(f.total, settings) + (lastTrip.plusToll ? TOLL_WORDS : '');
   $('resultDuration').textContent = lastTrip.durationText || '';
+  if (inPassengerMode()) {
+    $('resultNote').textContent = (vehicleOnline(currentVehicle, appConfig, rateSet)
+      ? 'Estimated with the official TukTuk Rider rates. '
+      : "Today's official rates couldn't be loaded, so the standard rates are used. ") +
+      'The final fare is worked out by the driver from the actual distance and waiting time.';
+  }
   renderRouteChoices();
 
   $('resultBreakdown').innerHTML = `
@@ -386,7 +444,7 @@ $('calcDistanceBtn').addEventListener('click', async () => {
     $('distanceError').textContent = `Please check the distance: more than ${MAX_DISTANCE_KM} km.`;
     return hideResult();
   }
-  if (isPassenger()) return passengerDistanceEstimate(km); // every vehicle type
+  if (comparingAll()) return passengerDistanceEstimate(km); // every vehicle type
   showResult(km, '', { mode: 'distance' });
 });
 
@@ -546,7 +604,7 @@ $('calcMapBtn').addEventListener('click', async () => {
   $('calcMapBtn').disabled = true;
   try {
     await ratesReady;
-    if (isPassenger()) return await passengerEstimate(); // every vehicle type, each on its own route
+    if (comparingAll()) return await passengerEstimate(); // every vehicle type, each on its own route
     const opts = routeOptions(currentVehicle);
     const r = await provider.route(points.start, points.end, opts);
     if (r.km < 0.01) throw new Error('start and end are the same place.');
@@ -584,6 +642,29 @@ $('clearMapBtn').addEventListener('click', () => {
   clearVia();
   mapError();
   hideResult();
+});
+
+// ---------- Passenger: one vehicle type ----------
+function tripEstimateText() {
+  const seats = settings.passengers ? ` (${seatsWords(settings.passengers)})` : '';
+  const total = formatMoney(calculateFare(lastTrip.distanceKm, settings, lastTrip.waitingMins, tripType).total, settings) +
+    (lastTrip.plusToll ? TOLL_WORDS : '');
+  const r = lastTrip.mode === 'map' ? lastTrip.route : null;
+  return [
+    '🛺 TukTuk Rider — fare estimate',
+    ...(lastTrip.mode === 'map' ? [`From: ${lastTrip.from || '-'}`, `To: ${lastTrip.to || '-'}`] : []),
+    `${vehicleLabel(appConfig, currentVehicle)}${seats} • ${TRIP_TYPES[tripType].name}`,
+    `${Number(lastTrip.distanceKm).toFixed(1)} km` + (r ? ` (~${r.mins} min)` : lastTrip.mode === 'distance' ? ' (entered)' : '') +
+      (lastTrip.plusToll && r.expresswayKm ? `, ${r.expresswayKm} km on the expressway` : '') +
+      (lastTrip.waitingMins ? ` • ${formatWaiting(lastTrip.waitingMins)} waiting` : ''),
+    `Estimated fare: ${total}`
+  ].join('\n');
+}
+
+$('shareTripBtn').addEventListener('click', () => lastTrip && shareEstimate(tripEstimateText()));
+$('compareAllBtn').addEventListener('click', () => {
+  applyPassengerVehicle('');
+  $('vehicleSelect').scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
 // ---------- PDF receipt ----------
